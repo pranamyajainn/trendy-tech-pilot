@@ -4,6 +4,11 @@ Implementation of the approximately 300-call, 50-lead extraction pilot in propos
 The deliverable is a structured workbook, a findings report and a mini worklist. There is no new dashboard.
 Read [the pilot scope](docs/pilot-scope.md) before running a batch.
 
+**Current stage: development calibration.** The software is implemented, but extraction accuracy has not
+passed the pilot gate. Qwen2.5 7B, Qwen3 8B and Qwen3.5 9B produced schema/evidence or meaning errors.
+The larger Qwen3.5 27B configuration is experimental and is not approved for bulk processing.
+Do not interpret a successful command, this repository, or exact-quote matching as completed pilot validation.
+
 ## Data flow
 
 Client Excel → audit → frozen sample and lead-level QA split → recording downloads → local Whisper
@@ -41,10 +46,12 @@ Review development outputs and audio before freezing the method. Keep held-out c
 .venv/bin/pilot qa
 ```
 
-Every stage resumes existing artifacts. ASR caches include audio/model/version hashes; extraction caches
+Every stage resumes existing artifacts. ASR caches include audio/model/immutable-weight-revision/version hashes; extraction caches
 include transcript/model/prompt hashes. Invalid generations are quarantined and attempted at most twice.
 Commands exit nonzero when any call fails, while preserving successful work. Audio downloads are restricted
 to the approved HTTPS recording host and validated with ffprobe. Holdout inference requires a frozen method.
+Complete cached model snapshots are loaded locally. Set `HF_HUB_OFFLINE=1` after downloading model weights
+to prevent network metadata checks. Do not run ASR and large-model extraction simultaneously on a 24 GB Mac.
 
 ## Outputs and interpretation
 
@@ -52,13 +59,15 @@ to the approved HTTPS recording host and validated with ffprobe. Holdout inferen
 - `data/exports/calls.csv`: call-level extraction and provisional coverage of five call-quality dimensions.
 - `data/exports/evidence.csv`: exact transcript quotations with call IDs and timestamps.
 - `data/exports/overview.json`: coverage and explicitly bounded cost metrics.
-- `data/qa/`: independent-review templates. Empty references never produce accuracy scores.
+- `data/qa/`: full-call independent references and field review templates. Empty unreviewed references never produce accuracy scores. Explicitly reviewed silence can count hallucinated insertions.
 - `data/ledger.jsonl`: successful/failed attempts, runtimes, token counts and actual external spend.
 
 Missing extraction is distinct from no objection. Blank CRM conversion flags remain unknown. Yes flags are
 unverified; no conversion rate or probability is inferred. Worklist temperature is a transparent rule based
 on the last available call, not a trained score. CRM-reported enrollment and do-not-contact signals override
 sales-priority labels. All outputs require human review before sales use.
+Historical concerns are retained per call: a later concern in the same category does not silently resolve
+an earlier one. Cross-call resolution requires review. Superseded model/prompt artifacts are excluded.
 
 The 300/50 ratio requires a purposive sample enriched for repeated calls. Findings describe this pilot sample,
 not the entire archive. Journeys include every call in this export for each selected lead; complete lifetime
@@ -88,7 +97,18 @@ quotes, unsupported resolutions, chronology, contact suppression, retry accounti
 - [MLX Whisper](https://github.com/ml-explore/mlx-examples/tree/main/whisper)
 - [Whisper large-v3-turbo weights](https://huggingface.co/mlx-community/whisper-large-v3-turbo)
 - [MLX LM](https://github.com/ml-explore/mlx-lm)
-- [Qwen2.5 7B Instruct weights](https://huggingface.co/mlx-community/Qwen2.5-7B-Instruct-4bit)
+- [Qwen3.5 27B quantized weights](https://huggingface.co/mlx-community/Qwen3.5-27B-4bit)
 
 Model choice is provisional until the actual call quality checks pass. Model agreement is not a substitute
 for listening to audio and reviewing the extracted meaning.
+
+## Private workbook and report
+
+After `pilot export`, `scripts/export_workbook.mjs` creates the Excel workbook using the Codex bundled
+`@oai/artifact-tool` runtime. `scripts/build_report.py` uses bundled Python with python-docx for the review
+document. Render and visually inspect both before delivery. These builders disclose incomplete extraction
+and pending accuracy rather than presenting them as completed results. JSON/CSV exports do not need the
+artifact runtime. Private deliverables belong under ignored `data/deliverables/`.
+
+Run `python scripts/check_public_tree.py` after staging and before every public push. It checks indexed
+blobs, not just the working files. Never publish client recordings, source files, transcripts or deliverables.

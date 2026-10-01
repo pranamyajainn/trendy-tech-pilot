@@ -13,7 +13,7 @@ for item in filter(None, paths):
     } or (path.name.startswith(".env") and path.name != ".env.example"):
         bad.append(item)
         continue
-    content = path.read_text(errors="ignore") if path.exists() else ""
+    content = subprocess.check_output(["git", "show", ":" + item]).decode(errors="ignore")
     if re.search(r"https://recordings[.]mcube[.]com/\S+", content):
         bad.append(item)
     if re.search(r"\b(?:sk-proj-|gsk_)[A-Za-z0-9_-]{20,}", content):

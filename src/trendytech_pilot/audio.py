@@ -9,9 +9,10 @@ from urllib.parse import urlsplit
 
 import httpx
 
+from .models import local_model_path, local_revision
 from .storage import digest, read_json, write_json
 
-ASR_VERSION = "whisper-timestamps-v1"
+ASR_VERSION = "whisper-timestamps-v2"
 MAX_AUDIO_BYTES = 180 * 1024 * 1024
 
 
@@ -84,7 +85,8 @@ def transcribe(call, store, model, force=False):
     import mlx_whisper
 
     meta = read_json(store.path("audio", call["call_id"] + ".json"))
-    fingerprint = digest([meta["sha256"], model, ASR_VERSION])
+    revision = local_revision(model)
+    fingerprint = digest([meta["sha256"], model, revision, ASR_VERSION])
     path = store.path("transcripts", call["call_id"] + ".json")
     if path.exists() and not force:
         prior = read_json(path)
@@ -93,7 +95,7 @@ def transcribe(call, store, model, force=False):
     start = time.monotonic()
     try:
         result = mlx_whisper.transcribe(
-            meta["file"], path_or_hf_repo=model, language="en", task="transcribe",
+            meta["file"], path_or_hf_repo=local_model_path(model), language="en", task="transcribe",
             temperature=0.0, condition_on_previous_text=False, word_timestamps=False, verbose=None,
         )
         segments = []
@@ -113,7 +115,7 @@ def transcribe(call, store, model, force=False):
         # Mono ASR does not perform diarization. Speaker roles are separate, unverified extraction claims.
         transcript = {"call_id": call["call_id"], "fingerprint": fingerprint,
                       "audio_sha256": meta["sha256"], "duration_seconds": meta["duration_seconds"],
-                      "model": model, "version": ASR_VERSION, "language": result.get("language"),
+                      "model": model, "model_revision": revision, "version": ASR_VERSION, "language": result.get("language"),
                       "speaker_diarization": "not_performed", "segments": segments,
                       "flags": sorted(set(flags)), "wall_seconds": time.monotonic() - start}
         write_json(path, transcript)
@@ -125,4 +127,8 @@ def transcribe(call, store, model, force=False):
     except Exception as exc:
         store.event(stage="transcribe", call_id=call["call_id"], status="failed", model=model,
                     error_type=type(exc).__name__, wall_seconds=time.monotonic() - start, external_cost_inr=0)
+        raise
+    except KeyboardInterrupt:
+        store.event(stage="transcribe", call_id=call["call_id"], status="interrupted", model=model,
+                    wall_seconds=time.monotonic() - start, external_cost_inr=0)
         raise

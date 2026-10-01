@@ -1,8 +1,9 @@
-"""Independent QA worksheets; blank references never become a passing score."""
+"""Independent full-call references; missing reviews never become passing scores."""
 
 import csv
 
-from .storage import read_json, write_csv, write_json
+from .artifacts import current_extraction, current_transcript
+from .storage import digest, read_json, write_csv, write_json
 
 
 def merge_review_template(path, rows, fields, keys):
@@ -11,14 +12,16 @@ def merge_review_template(path, rows, fields, keys):
         with path.open(encoding="utf-8-sig") as handle:
             existing = list(csv.DictReader(handle))
     by_key = {tuple(str(row.get(k, "")) for k in keys): row for row in existing}
+    review_fields = {"reference_text", "reviewed_silence", "reviewer", "reviewed_at",
+                     "reference_value", "extraction_correct", "missed_information"}
     merged = []
     for row in rows:
-        key = tuple(str(row.get(k, "")) for k in keys)
-        prior = by_key.get(key)
-        merged.append({**row, **prior} if prior else row)
-    # Keep prior reviews, including rows no longer present, for audit rather than silently deleting them.
+        prior = by_key.get(tuple(str(row.get(k, "")) for k in keys), {})
+        merged.append({**row, **{k: v for k, v in prior.items() if k in review_fields}})
     new_keys = {tuple(str(row.get(k, "")) for k in keys) for row in rows}
-    merged.extend(row for key, row in by_key.items() if key not in new_keys)
+    stale = [row for key, row in by_key.items() if key not in new_keys]
+    if stale:
+        write_csv(path.with_name(path.stem + "-superseded-" + digest(stale)[:10] + ".csv"), stale)
     write_csv(path, merged, fields)
 
 
@@ -30,55 +33,97 @@ def word_error_rate(reference, hypothesis):
 
 
 def export_qa(store):
-    calls = read_json(store.path("selection.json"))["calls"]
-    items = []
+    calls = [c for c in read_json(store.path("selection.json"))["calls"] if c["split"] == "holdout"]
+    text_rows, field_rows = [], []
     for call in calls:
-        if call["split"] != "holdout":
-            continue
-        path = store.path("transcripts", call["call_id"] + ".json")
-        if not path.exists():
-            continue
-        transcript = read_json(path)
-        for segment in transcript["segments"]:
-            items.append({"lead_alias": call["lead_alias"], "call_id": call["call_id"],
-                          "segment_id": segment["id"], "start_seconds": segment["start"],
-                          "end_seconds": segment["end"], "asr_text": segment["text"],
-                          "reference_text": "", "speaker_reference": "", "reviewer": "", "reviewed_at": ""})
-    target = store.path("qa", "holdout_transcription_review.csv")
-    merge_review_template(target, items, ["lead_alias", "call_id", "segment_id", "start_seconds", "end_seconds", "asr_text",
-                                         "reference_text", "speaker_reference", "reviewer", "reviewed_at"], ["call_id", "segment_id"])
-    field_target = store.path("qa", "holdout_field_review.csv")
-    if not field_target.exists():
-        fields = []
-        for call in calls:
-            if call["split"] == "holdout":
-                for field in ["goal", "current_role", "experience", "course", "timeline", "objections", "next_action"]:
-                    fields.append({"lead_alias": call["lead_alias"], "call_id": call["call_id"], "field": field,
-                                   "reference_value": "", "extraction_correct": "", "missed_information": "",
-                                   "reviewer": "", "reviewed_at": ""})
-        write_csv(field_target, fields)
+        cid = call["call_id"]
+        transcript = current_transcript(store, cid)
+        if transcript:
+            # Full recording coverage catches speech missing from ASR, including empty ASR output.
+            # Model text is absent from the independent reference collection sheet.
+            text_rows.append({"lead_alias": call["lead_alias"], "call_id": cid,
+                              "artifact_fingerprint": transcript["fingerprint"], "start_seconds": 0,
+                              "end_seconds": transcript["duration_seconds"], "reference_text": "",
+                              "reviewed_silence": "", "reviewer": "", "reviewed_at": ""})
+        artifact = current_extraction(store, cid)
+        if artifact:
+            for field in ["conversation_type", "goal", "current_role", "experience", "course", "timeline",
+                          "budget", "signals", "objections", "pitches", "next_action", "summary"]:
+                field_rows.append({"lead_alias": call["lead_alias"], "call_id": cid, "field": field,
+                                   "artifact_fingerprint": artifact["fingerprint"], "reference_value": "",
+                                   "extraction_correct": "", "missed_information": "", "reviewer": "", "reviewed_at": ""})
+    merge_review_template(store.path("qa", "holdout_transcription_review.csv"), text_rows,
+                          ["lead_alias", "call_id", "artifact_fingerprint", "start_seconds", "end_seconds",
+                           "reference_text", "reviewed_silence", "reviewer", "reviewed_at"],
+                          ["call_id", "artifact_fingerprint"])
+    merge_review_template(store.path("qa", "holdout_field_review.csv"), field_rows,
+                          ["lead_alias", "call_id", "artifact_fingerprint", "field", "reference_value",
+                           "extraction_correct", "missed_information", "reviewer", "reviewed_at"],
+                          ["call_id", "artifact_fingerprint", "field"])
     summary = evaluate_reviews(store)
-    summary.update({"holdout_calls": sum(c["split"] == "holdout" for c in calls), "transcribed_segments": len(items),
-               "note": "Schema validity and exact-quote matching are technical checks, not accuracy estimates."}
-    )
+    summary.update({"holdout_calls": len(calls), "available_call_references": len(text_rows),
+                    "note": "Review the entire recording independently, including speech ASR omitted. Mark reviewed_silence=yes only for genuinely silent full calls."})
     write_json(store.path("qa", "status.json"), summary)
     return summary
 
 
 def evaluate_reviews(store):
-    """Score only explicitly signed-off reference rows; report missing review coverage."""
-    transcript_file = store.path("qa", "holdout_transcription_review.csv")
-    field_file = store.path("qa", "holdout_field_review.csv")
-    text_rows = list(csv.DictReader(transcript_file.open(encoding="utf-8-sig"))) if transcript_file.exists() else []
-    field_rows = list(csv.DictReader(field_file.open(encoding="utf-8-sig"))) if field_file.exists() else []
-    reviewed_text = [r for r in text_rows if r.get("reviewer") and r.get("reviewed_at") and r.get("reference_text", "").strip()]
-    reviewed_fields = [r for r in field_rows if r.get("reviewer") and r.get("reviewed_at") and r.get("extraction_correct") in ("yes", "no")]
-    error_rate = None
-    if reviewed_text:
-        from jiwer import wer
-        error_rate = wer([r["reference_text"] for r in reviewed_text], [r["asr_text"] for r in reviewed_text])
-    return {"reviewed_segments": len(reviewed_text), "total_review_segments": len(text_rows),
-            "reviewed_fields": len(reviewed_fields), "total_review_fields": len(field_rows),
-            "wer": error_rate,
+    """Recheck artifact freshness when scoring, not only when creating review templates."""
+    calls = {c["call_id"] for c in read_json(store.path("selection.json"))["calls"] if c["split"] == "holdout"}
+
+    def read_rows(name):
+        path = store.path("qa", name)
+        if not path.exists():
+            return []
+        with path.open(encoding="utf-8-sig") as handle:
+            return list(csv.DictReader(handle))
+
+    refs, hypotheses, reviewed_fields = [], [], []
+    seen_text, seen_fields = set(), set()
+    ignored = silence = 0
+    text_rows = read_rows("holdout_transcription_review.csv")
+    field_rows = read_rows("holdout_field_review.csv")
+    for row in text_rows:
+        cid = row["call_id"]
+        artifact = current_transcript(store, cid) if cid in calls else None
+        if not artifact or row.get("artifact_fingerprint") != artifact["fingerprint"] or cid in seen_text:
+            ignored += 1
+            continue
+        seen_text.add(cid)
+        ref = row.get("reference_text", "").strip()
+        silent = row.get("reviewed_silence", "").lower() == "yes"
+        if not row.get("reviewer") or not row.get("reviewed_at") or (not ref and not silent) or (ref and silent):
+            continue
+        refs.append(ref)
+        hypotheses.append(" ".join(s["text"] for s in artifact["segments"]))
+        silence += silent
+    for row in field_rows:
+        cid = row["call_id"]
+        artifact = current_extraction(store, cid) if cid in calls else None
+        key = (cid, row.get("field"))
+        if not artifact or row.get("artifact_fingerprint") != artifact["fingerprint"] or key in seen_fields:
+            ignored += 1
+            continue
+        seen_fields.add(key)
+        if row.get("reviewer") and row.get("reviewed_at") and row.get("extraction_correct") in ("yes", "no"):
+            reviewed_fields.append(row)
+    metrics = {"wer": None, "reference_words": 0, "substitutions": 0, "deletions": 0, "insertions": 0}
+    if refs:
+        from jiwer import (
+            Compose,
+            ReduceToListOfListOfWords,
+            RemoveMultipleSpaces,
+            Strip,
+            ToLowerCase,
+            process_words,
+        )
+        transform = Compose([ToLowerCase(), RemoveMultipleSpaces(), Strip(), ReduceToListOfListOfWords()])
+        result = process_words(refs, hypotheses, reference_transform=transform, hypothesis_transform=transform)
+        words = result.hits + result.substitutions + result.deletions
+        metrics.update(wer=result.wer if words else None, reference_words=words,
+                       substitutions=result.substitutions, deletions=result.deletions, insertions=result.insertions)
+    return {"reviewed_calls": len(refs), "expected_holdout_calls": len(calls), "reviewed_silent_calls": silence,
+            "reviewed_fields": len(reviewed_fields), "available_field_rows": len(seen_fields),
+            "ignored_stale_or_duplicate_rows": ignored, **metrics,
             "field_accuracy": sum(r["extraction_correct"] == "yes" for r in reviewed_fields) / len(reviewed_fields) if reviewed_fields else None,
             "quality_gate": "Pending independent review and agreed acceptance criteria"}

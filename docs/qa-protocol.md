@@ -16,17 +16,24 @@ acceptance threshold. Do not invent client acceptance or claim that exact-quote 
 ## Held-out evaluation
 
 1. Run the frozen method on the held-out leads without changing it based on their results.
-2. Use `pilot qa` to prepare local reference worksheets. A reviewer first listens to the audio and writes
-   reference text/fields. Model output must not serve as its own reference.
+2. Use `pilot qa` to prepare local reference worksheets. A reviewer listens to each entire recording and
+   writes reference text/fields independently. The reference sheet deliberately hides the ASR hypothesis.
+   Include speech missing from ASR. Set `reviewed_silence=yes` only for a full call with no intelligible speech.
 3. Add reviewer name and review timestamp. Leave genuinely unreviewed rows blank.
 4. Rerun `pilot qa` to measure word error rate and field correctness on signed-off rows, always with review
-   counts/denominators. Report missing review coverage. Review omitted facts as well as extracted facts.
+   counts/denominators. WER normalizes case and whitespace, retaining punctuation. All-silence review sets
+   report insertion counts and leave WER unavailable because the reference word denominator is zero.
+   Report missing review coverage. Review omitted facts as well as extracted facts.
 5. Check the exact source quote, what it means, and which speaker said it. No diarization is performed by
    the current mono-ASR route. Ambiguous role attribution requires correction or an unknown value.
 6. Separate generic call-quality evidence coverage from approved script adherence (unavailable).
 
 Until this is complete, deliverables must say accuracy is not yet independently established. The client
 must not be told that the commercial accuracy gate has passed.
+
+Both model weight revisions and the prompt are frozen. Stale artifacts are excluded from reports and QA.
+Review rows belong to a specific artifact fingerprint; superseded reviews are archived separately.
+An unresolved concern is retained from its source call until a cross-call review confirms it was resolved.
 
 ## Current calibration findings
 

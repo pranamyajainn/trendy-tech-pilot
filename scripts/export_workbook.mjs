@@ -15,7 +15,7 @@ const safe = value => {
   if (typeof value === 'object') value = JSON.stringify(value);
   return typeof value === 'string' && /^[\s]*[=+@-]/.test(value) ? "'" + value : value;
 };
-const titleCase = key => key.replaceAll('_', ' ').replace(/^./, c => c.toUpperCase());
+const titleCase = key => key === 'open_objections' ? 'Historically unresolved concerns — confirm current status' : key.replaceAll('_', ' ').replace(/^./, c => c.toUpperCase());
 const col = n => {
   let label = '';
   for (n++; n > 0; n = Math.floor((n - 1) / 26)) label = String.fromCharCode(65 + (n - 1) % 26) + label;
@@ -65,7 +65,7 @@ const counts = [
   {item: 'Rubric', value: 'Call-quality columns show provisional evidence coverage, not approved performance scores. Script adherence unavailable.'},
 ];
 table('Pilot readout', counts, ['item', 'value'], {item: 46, value: 105});
-table('Worklist', worklist, ['lead_alias', 'lead_number', 'current_owner', 'priority', 'as_of_recorded_call', 'goal', 'open_objections', 'next_action_suggestion', 'calls_analysed', 'calls_in_export', 'outcome'],
+table('Worklist', worklist, ['lead_alias', 'lead_number', 'current_owner', 'priority', 'as_of_recorded_call', 'goal', 'open_objections', 'objection_history_note', 'next_action_suggestion', 'calls_analysed', 'calls_in_export', 'outcome'],
   {goal: 38, open_objections: 65, next_action_suggestion: 75, outcome: 40});
 table('Journey review', worklist, ['lead_alias', 'total_call_minutes_crm', 'mean_gap_days', 'strengths', 'weaknesses_or_unknowns', 'opportunity', 'threats', 'conflicting_profile_fields', 'effort_review', 'journey_coverage', 'split'],
   {strengths: 60, weaknesses_or_unknowns: 36, opportunity: 55, threats: 35, journey_coverage: 45});
@@ -73,7 +73,7 @@ table('Lead profiles', profiles, ['lead_alias', 'current_role', 'experience', 'c
   {goal: 55, timeline: 38, technology_interest: 35});
 table('Calls', calls, ['lead_alias', 'call_id', 'call_number_in_export', 'created_on', 'salesperson', 'duration_seconds_audio', 'conversation_type', 'processing_status', 'summary', 'objections', 'next_action_suggestion', 'qualification', 'discovery', 'pitch', 'objection_handling', 'script_adherence', 'closing', 'asr_flags', 'uncertainties', 'split'],
   {summary: 85, objections: 65, next_action_suggestion: 70, processing_status: 38, uncertainties: 60, script_adherence: 40});
-table('Evidence', evidence, ['lead_alias', 'call_id', 'field', 'claim', 'quote', 'start_seconds', 'end_seconds', 'segment_id', 'review_status'],
+table('Evidence', evidence, ['lead_alias', 'call_id', 'collection', 'field', 'evidence_type', 'claim', 'quote', 'start_seconds', 'end_seconds', 'segment_id', 'review_status'],
   {claim: 65, quote: 95, review_status: 38});
 table('Processing costs', Object.entries(overview.costs).map(([item, value]) => ({item: titleCase(item), value: value ?? 'Unmeasured'})), ['item', 'value'], {item: 55, value: 105});
 

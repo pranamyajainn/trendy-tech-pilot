@@ -48,7 +48,7 @@ automation, calibrated lead probabilities, and controlled conversion-lift experi
 
 ## Delivery checklist
 
-- [ ] 300 downloadable, playable audio files with source manifest and checksums
+- [x] 300 downloaded audio files validated with ffprobe, with source manifest and checksums
 - [ ] 300 timestamped transcripts and validated call extractions
 - [ ] 50 export-complete lead journeys and a mini worklist
 - [ ] Structured Excel workbook and plain-language findings report

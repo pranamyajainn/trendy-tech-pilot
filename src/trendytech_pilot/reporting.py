@@ -5,6 +5,7 @@ from collections import Counter, defaultdict
 from datetime import datetime
 from itertools import pairwise
 
+from .artifacts import current_extraction
 from .storage import digest, read_json, write_csv, write_json
 
 
@@ -65,6 +66,9 @@ def cost_summary(store, calls):
 
 
 def quality_coverage(extraction):
+    if extraction.get("conversation_type") in {"learner_support", "administrative", "unusable"}:
+        return dict.fromkeys(["qualification", "discovery", "pitch", "objection_handling", "script_adherence", "closing"],
+                             "Not applicable to this call type")
     facts = {f["field"] for f in extraction["facts"]}
     signals = {s["kind"] for s in extraction["signals"]}
     return {
@@ -84,12 +88,9 @@ def export_tables(store):
     analyses = {}
     for c in calls:
         groups[c["lead_number"]].append(c)
-        path = store.path("extractions", c["call_id"] + ".json")
-        if path.exists():
-            artifact = read_json(path)
-            transcript = read_json(store.path("transcripts", c["call_id"] + ".json"))
-            if artifact.get("transcript_fingerprint") == transcript["fingerprint"]:
-                analyses[c["call_id"]] = artifact
+        artifact = current_extraction(store, c["call_id"])
+        if artifact:
+            analyses[c["call_id"]] = artifact
     worklist, call_rows, evidence_rows, profile_rows = [], [], [], []
     objection_counts = Counter()
     for lead, group in groups.items():
@@ -98,7 +99,7 @@ def export_tables(store):
         priority, reason = priority_for(group, lead_analyses)
         facts = {}
         history = defaultdict(set)
-        objections = {}
+        objections = []
         strengths = []
         signals_all = set()
         for c in group:
@@ -120,11 +121,20 @@ def export_tables(store):
                 segments = {s["id"]: s for s in transcript["segments"]}
                 record["duration_seconds_audio"] = transcript["duration_seconds"]
                 record["speaker_roles"] = "Inferred from conversation; not diarized or verified"
+                ev = ex.get("purpose_evidence")
+                if ev:
+                    segment = segments[ev["segment_id"]]
+                    evidence_rows.append({"lead_alias": c["lead_alias"], "call_id": c["call_id"],
+                                          "collection": "purpose", "field": "conversation_type",
+                                          "claim": ex["conversation_type"], "evidence_type": "purpose_evidence",
+                                          "quote": ev["quote"], "start_seconds": segment["start"],
+                                          "end_seconds": segment["end"], "segment_id": ev["segment_id"],
+                                          "review_status": "Not independently reviewed"})
                 for fact in ex["facts"]:
                     facts[fact["field"]] = fact["value"]
                     history[fact["field"]].add(fact["value"])
                 for obj in ex["objections"]:
-                    objections[obj["category"]] = (obj, c["call_id"])
+                    objections.append((obj, c["call_id"]))
                 objection_counts.update({obj["category"] for obj in ex["objections"]})
                 signals_all.update(s["kind"] for s in ex["signals"])
                 strengths.extend(s["description"] for s in ex["signals"] if s["kind"] in {"goal", "urgency", "payment_intent"})
@@ -137,13 +147,19 @@ def export_tables(store):
                             if not ev:
                                 continue
                             segment = segments[ev["segment_id"]]
+                            claim = value
+                            if key == "response_evidence":
+                                claim = item.get("response") or item.get("prospect_response")
+                            elif key == "resolution_evidence":
+                                claim = f"{item.get('resolution')}: {value}"
                             evidence_rows.append({"lead_alias": c["lead_alias"], "call_id": c["call_id"],
-                                                  "collection": collection, "field": label, "claim": value,
+                                                  "collection": collection, "field": label, "claim": claim,
                                                   "evidence_type": key, "quote": ev["quote"],
                                                   "start_seconds": segment["start"], "end_seconds": segment["end"],
                                                   "segment_id": ev["segment_id"], "review_status": "Not independently reviewed"})
             call_rows.append(record)
-        open_objections = [(o, cid) for o, cid in objections.values() if o["resolution"] != "resolved"]
+        # Do not infer that a later objection in the same category resolves an earlier concern.
+        open_objections = [(o, cid) for o, cid in objections if o["resolution"] != "resolved"]
         latest_result = analyses.get(group[-1]["call_id"])
         next_action = latest_result["extraction"]["next_action"] if latest_result else "Finish reviewing the available calls."
         if priority == "Verify enrollment":
@@ -168,6 +184,7 @@ def export_tables(store):
                          "target_role": facts.get("target_role"), "experience": facts.get("experience"),
                          "timeline": facts.get("timeline"), "course": facts.get("course"),
                          "open_objections": "; ".join(f"{o['category']}: {o['concern']} ({cid})" for o, cid in open_objections),
+                         "objection_history_note": "Unresolved in its source call; later resolution requires cross-call review",
                          "next_action_suggestion": next_action,
                          "strengths": "; ".join(dict.fromkeys(strengths))[:1200],
                          "weaknesses_or_unknowns": "; ".join(k for k in ["goal", "timeline", "budget"] if k not in facts) or "No missing key discovery fields detected",

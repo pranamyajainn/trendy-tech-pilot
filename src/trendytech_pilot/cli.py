@@ -20,9 +20,12 @@ def selected_calls(store, split="development", limit=None):
 def freeze_method(store, asr_model, llm_model):
     from .audio import ASR_VERSION
     from .extract import PROMPT_VERSION, SYSTEM
+    from .models import LOCAL_REVISIONS
 
     selection = read_json(store.path("selection.json"))
     method = {"selection_sha256": selection["sha256"], "asr_model": asr_model, "llm_model": llm_model,
+              "llm_revision": LOCAL_REVISIONS.get(llm_model),
+              "asr_revision": LOCAL_REVISIONS.get(asr_model),
               "asr_version": ASR_VERSION, "prompt_version": PROMPT_VERSION, "prompt_sha256": digest(SYSTEM)}
     path = store.path("method-freeze.json")
     if path.exists() and read_json(path) != method:
@@ -62,7 +65,7 @@ def main():
     provider = os.getenv("PILOT_EXTRACTOR", "local")
     if provider not in ("local", "gemini"):
         raise ValueError("PILOT_EXTRACTOR must be local or gemini")
-    llm_model = "gemini-3.8-flash" if provider == "gemini" else os.getenv("PILOT_LLM_MODEL", "mlx-community/Qwen2.5-7B-Instruct-4bit")
+    llm_model = "gemini-3.8-flash" if provider == "gemini" else os.getenv("PILOT_LLM_MODEL", "mlx-community/Qwen3.5-27B-4bit")
     if args.command == "audit":
         from .ingest import import_workbook
         print(json.dumps(import_workbook(args.workbook, store), indent=2))
@@ -70,9 +73,13 @@ def main():
         from .ingest import save_selection
         print(json.dumps(save_selection(read_json(store.path("calls.json")), store, args.seed), indent=2))
     elif args.command == "status":
+        from .artifacts import current_extraction, current_transcript
+
         calls = selected_calls(store, "all")
         print(json.dumps({"selected_calls": len(calls), "selected_leads": len({c['lead_number'] for c in calls}),
                           **{stage: len(list(store.path(stage).glob("*.json"))) for stage in ["audio", "transcripts", "extractions"]},
+                          "current_transcripts": sum(current_transcript(store, c["call_id"]) is not None for c in calls),
+                          "current_extractions": sum(current_extraction(store, c["call_id"]) is not None for c in calls),
                           "method_frozen": store.path("method-freeze.json").exists()}, indent=2))
     elif args.command == "freeze":
         print(json.dumps(freeze_method(store, asr_model, llm_model), indent=2))
@@ -84,7 +91,8 @@ def main():
         print(json.dumps(export_qa(store), indent=2))
     else:
         calls = selected_calls(store, args.split, args.limit)
-        if args.command != "download" and any(c["split"] == "holdout" for c in calls):
+        if args.command != "download" and (store.path("method-freeze.json").exists()
+                                             or any(c["split"] == "holdout" for c in calls)):
             verify_freeze(store, asr_model, llm_model)
         extractor = None
         if args.command == "extract":
