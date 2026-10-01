@@ -1,0 +1,94 @@
+# TrendyTech sales call extraction pilot
+
+Implementation of the approximately 300-call, 50-lead extraction pilot in proposal SAI-Q-2026-013.
+The deliverable is a structured workbook, a findings report and a mini worklist. There is no new dashboard.
+Read [the pilot scope](docs/pilot-scope.md) before running a batch.
+
+## Data flow
+
+Client Excel → audit → frozen sample and lead-level QA split → recording downloads → local Whisper
+transcripts → local Qwen structured extraction → exact-quote checks → lead journeys and worklist → QA and cost report.
+
+The source workbook, recordings, transcripts, model responses, quarantine files, contact details and outputs
+live under ignored `data/`. This is a public code repository: never force-add client artifacts.
+
+## Run on Apple silicon
+
+Python 3.11+, FFmpeg/ffprobe and enough disk space for the recordings and local model weights are required.
+The first execution downloads pretrained model weights. No model training and no paid API calls are used.
+
+```sh
+python3 -m venv .venv
+.venv/bin/pip install -e '.[local,test,qa]'
+cp .env.example .env
+.venv/bin/pilot audit /absolute/path/to/client-export.xlsx
+.venv/bin/pilot select
+.venv/bin/pilot download --split all
+.venv/bin/pilot transcribe --limit 12
+.venv/bin/pilot extract --limit 12
+.venv/bin/pilot status
+```
+
+Review development outputs and audio before freezing the method. Keep held-out calls untouched until then.
+
+```sh
+.venv/bin/pilot transcribe
+.venv/bin/pilot extract
+.venv/bin/pilot freeze
+.venv/bin/pilot transcribe --split holdout
+.venv/bin/pilot extract --split holdout
+.venv/bin/pilot export
+.venv/bin/pilot qa
+```
+
+Every stage resumes existing artifacts. ASR caches include audio/model/version hashes; extraction caches
+include transcript/model/prompt hashes. Invalid generations are quarantined and attempted at most twice.
+Commands exit nonzero when any call fails, while preserving successful work. Audio downloads are restricted
+to the approved HTTPS recording host and validated with ffprobe. Holdout inference requires a frozen method.
+
+## Outputs and interpretation
+
+- `data/exports/worklist.csv`: one row per lead, as of its last exported call; suggested next steps and opportunity SWOT.
+- `data/exports/calls.csv`: call-level extraction and provisional coverage of five call-quality dimensions.
+- `data/exports/evidence.csv`: exact transcript quotations with call IDs and timestamps.
+- `data/exports/overview.json`: coverage and explicitly bounded cost metrics.
+- `data/qa/`: independent-review templates. Empty references never produce accuracy scores.
+- `data/ledger.jsonl`: successful/failed attempts, runtimes, token counts and actual external spend.
+
+Missing extraction is distinct from no objection. Blank CRM conversion flags remain unknown. Yes flags are
+unverified; no conversion rate or probability is inferred. Worklist temperature is a transparent rule based
+on the last available call, not a trained score. CRM-reported enrollment and do-not-contact signals override
+sales-priority labels. All outputs require human review before sales use.
+
+The 300/50 ratio requires a purposive sample enriched for repeated calls. Findings describe this pilot sample,
+not the entire archive. Journeys include every call in this export for each selected lead; complete lifetime
+coverage is unconfirmed. Timestamps preserve source values with timezone unconfirmed. Mono audio is not
+speaker-diarized; speaker attribution from conversation is explicitly unverified.
+
+## Cost and accuracy gate
+
+The proposal uses INR 0.60/audio-minute and satisfactory held-out accuracy as the scale-up gate.
+API spend for local inference is zero, but that is not the full economic cost. Configure
+`PILOT_LOCAL_COMPUTE_INR_PER_HOUR` only with a defensible hardware/electricity allocation. Engineering,
+human QA, storage and setup costs must be recorded separately. Unknown costs and missing independent QA
+cannot be interpreted as a passed commercial gate. Automatic quote matching is not semantic accuracy.
+
+## Verification
+
+```sh
+.venv/bin/pytest -q
+.venv/bin/ruff check src tests
+```
+
+Tests cover complete-journey sampling, reproducibility, lead-disjoint holdouts, unknown outcomes, fabricated
+quotes, unsupported resolutions, chronology, contact suppression, retry accounting and spreadsheet injection.
+
+## Model references
+
+- [MLX Whisper](https://github.com/ml-explore/mlx-examples/tree/main/whisper)
+- [Whisper large-v3-turbo weights](https://huggingface.co/mlx-community/whisper-large-v3-turbo)
+- [MLX LM](https://github.com/ml-explore/mlx-lm)
+- [Qwen2.5 7B Instruct weights](https://huggingface.co/mlx-community/Qwen2.5-7B-Instruct-4bit)
+
+Model choice is provisional until the actual call quality checks pass. Model agreement is not a substitute
+for listening to audio and reviewing the extracted meaning.

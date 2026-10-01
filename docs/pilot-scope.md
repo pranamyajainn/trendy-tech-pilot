@@ -1,0 +1,56 @@
+# Pilot implementation scope
+
+Authority: client proposal SAI-Q-2026-013, 28 September 2026, pages 3–4.
+The customer authorised starting the pilot on 1 October 2026 and chose local models.
+The signed proposal file, recordings and client workbook remain outside Git history.
+
+## Commitments
+
+- Build an extraction pipeline and process approximately 300 calls across approximately 50 lead journeys.
+- Extract stated profile, goals, timing, pitches, responses, objections and handling with supporting transcript evidence.
+- Deliver a structured workbook, a short findings report and a mini worklist with next-call guidance.
+- Benchmark transcription and extraction quality with a held-out sample.
+- Measure processing cost per audio minute, against the proposal's INR 0.60/minute scale-up ceiling.
+- Preserve every available call for selected leads. An export-complete journey is not proof of a complete lifetime history.
+
+## Current instructions and data limitations
+
+The owner confirmed verified payment dates and approved scripts are unavailable and instructed us to proceed.
+Blank conversion flags stay unknown. A Yes flag means CRM-reported conversion, not independently verified purchase.
+The pilot does not estimate conversion probabilities, claim uplift, or attribute sales causally to a pitch.
+Script adherence remains unavailable. Other call-quality dimensions use an explicitly provisional rubric.
+All source rows are answered calls, so best-contact-time success rates cannot be estimated.
+Recorded timestamps retain their source values; timezone is unconfirmed.
+Worklist guidance is retrospective, as of the last available call. Current live status requires confirmation.
+
+## Selection and evaluation
+
+Select 50 leads, 300 calls, deterministically from the provided export. Enrich for multi-call journeys to meet
+the contracted call/lead ratio; this is a purposive pilot sample, not a representative conversion cohort.
+Keep 10 entire leads in a locked QA holdout before examining their content. Never tune on the holdout.
+Record source hash, selection seed, sampling strata and model/prompt versions.
+Automatic schema/evidence checks measure consistency, not real-world transcription or extraction accuracy.
+Final accuracy needs independent reference transcripts and field judgements, kept separate from model output.
+No numerical accuracy acceptance threshold was specified in the proposal. Proposed targets must be labelled
+internal and cannot be claimed as client-agreed acceptance criteria.
+
+## Cost boundaries
+
+Track unique successful audio minutes once, every inference attempt and retry, wall time, model identifiers,
+external API spend and optional local compute cost. Local API spend can be zero while labour, power and
+hardware are nonzero or unmeasured. An unmeasured fully allocated rate cannot pass the commercial cost gate.
+Show the external-spend rate separately from the fully allocated processing rate and quality gate.
+
+## Excluded
+
+Full archive processing, ML training, live voice agents, a dashboard, CRM integration, current-lead refresh
+automation, calibrated lead probabilities, and controlled conversion-lift experiments are outside this pilot.
+
+## Delivery checklist
+
+- [ ] 300 downloadable, playable audio files with source manifest and checksums
+- [ ] 300 timestamped transcripts and validated call extractions
+- [ ] 50 export-complete lead journeys and a mini worklist
+- [ ] Structured Excel workbook and plain-language findings report
+- [ ] Held-out QA references reviewed and accuracy measured
+- [ ] Actual runtime and cost ledger with clear inclusions and exclusions

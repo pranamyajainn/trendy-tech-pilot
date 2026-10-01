@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "trendytech-pilot"
+version = "0.1.0"
+description = "Evidence-linked sales call extraction pilot with local inference"
+requires-python = ">=3.11"
+dependencies = ["openpyxl>=3.1,<4", "pydantic>=2.10,<3", "httpx>=0.28,<1", "python-dotenv>=1,<2"]
+
+[project.optional-dependencies]
+local = ["mlx-whisper>=0.4.3,<0.5", "mlx-lm>=0.32,<0.33"]
+test = ["pytest>=8,<10", "ruff>=0.12,<1"]
+qa = ["jiwer>=4,<5"]
+
+[project.scripts]
+pilot = "trendytech_pilot.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

@@ -1,0 +1,94 @@
+"""Claims require literal transcript support; generated recommendations are separate."""
+
+import re
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class StrictModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class Evidence(StrictModel):
+    segment_id: int = Field(ge=0)
+    quote: str = Field(min_length=3, max_length=1000)
+
+
+class Fact(StrictModel):
+    field: Literal["location", "current_role", "company", "experience", "current_ctc", "target_role",
+                   "technology_interest", "course", "goal", "timeline", "budget", "availability"]
+    value: str = Field(min_length=1, max_length=400)
+    evidence: Evidence
+
+
+class Signal(StrictModel):
+    kind: Literal["goal", "urgency", "price_question", "payment_intent", "payment_claim", "followup_agreed",
+                  "demo_requested", "low_interest", "no_time", "not_a_fit", "do_not_contact", "other"]
+    description: str = Field(max_length=500)
+    evidence: Evidence
+
+
+class Objection(StrictModel):
+    category: Literal["price", "time", "trust", "course_fit", "prerequisites", "career_outcomes",
+                      "format", "timing", "decision_maker", "other"]
+    concern: str = Field(min_length=1, max_length=500)
+    evidence: Evidence
+    response: str | None = Field(default=None, max_length=700)
+    response_evidence: Evidence | None = None
+    resolution: Literal["resolved", "partly_addressed", "unresolved", "unclear"] = "unclear"
+    resolution_evidence: Evidence | None = None
+
+
+class Pitch(StrictModel):
+    topic: str = Field(max_length=400)
+    evidence: Evidence
+    prospect_response: str | None = Field(default=None, max_length=400)
+    response_evidence: Evidence | None = None
+
+
+class CallExtraction(StrictModel):
+    conversation_type: Literal["sales", "enrollment_or_payment", "learner_support", "administrative",
+                               "brief_followup", "unusable", "unclear"] = "unclear"
+    purpose_evidence: Evidence | None = None
+    summary: str = Field(max_length=900)
+    facts: list[Fact] = Field(default_factory=list, max_length=20)
+    signals: list[Signal] = Field(default_factory=list, max_length=15)
+    objections: list[Objection] = Field(default_factory=list, max_length=12)
+    pitches: list[Pitch] = Field(default_factory=list, max_length=12)
+    next_action: str = Field(max_length=700)
+    uncertainties: list[str] = Field(default_factory=list, max_length=10)
+
+
+def normalise(text):
+    return re.sub(r"\s+", " ", text).strip().casefold()
+
+
+def validate_evidence(extraction, transcript):
+    """Reject invented/mislocated quotes. Support does not prove semantic correctness."""
+    segments = {s["id"]: s for s in transcript["segments"]}
+    errors = []
+
+    def check(evidence, location):
+        if evidence is None:
+            return
+        segment = segments.get(evidence["segment_id"])
+        if segment is None or normalise(evidence["quote"]) not in normalise(segment["text"]):
+            errors.append(location)
+
+    data = extraction.model_dump() if isinstance(extraction, CallExtraction) else extraction
+    check(data.get("purpose_evidence"), "purpose_evidence")
+    if data.get("conversation_type", "unclear") not in ("unclear", "unusable") and not data.get("purpose_evidence"):
+        errors.append("purpose_missing_evidence")
+    for collection in ["facts", "signals", "objections", "pitches"]:
+        for index, item in enumerate(data.get(collection, [])):
+            for key in ["evidence", "response_evidence", "resolution_evidence"]:
+                check(item.get(key), f"{collection}[{index}].{key}")
+            if collection == "objections":
+                if item.get("response") and not item.get("response_evidence"):
+                    errors.append(f"{collection}[{index}].response_missing_evidence")
+                if item.get("resolution") == "resolved" and not item.get("resolution_evidence"):
+                    errors.append(f"{collection}[{index}].resolution_missing_evidence")
+            if collection == "pitches" and item.get("prospect_response") and not item.get("response_evidence"):
+                errors.append(f"{collection}[{index}].response_missing_evidence")
+    return errors
