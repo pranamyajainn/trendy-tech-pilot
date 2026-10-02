@@ -96,3 +96,46 @@ def test_public_scan_reads_staged_blob_not_cleaned_working_file(tmp_path):
     scanner = Path(__file__).resolve().parents[1] / "scripts" / "check_public_tree.py"
     result = subprocess.run([sys.executable, str(scanner)], cwd=tmp_path, capture_output=True, text=True, check=False)
     assert result.returncode != 0 and "accidental.txt" in result.stderr
+
+
+def test_export_keeps_distinct_concerns_and_labels_response_claim(tmp_path):
+    from trendytech_pilot.audio import ASR_VERSION
+    from trendytech_pilot.models import LOCAL_REVISIONS
+    from trendytech_pilot.reporting import export_tables
+    from trendytech_pilot.schema import CallExtraction
+    from trendytech_pilot.storage import Store, digest, read_json, write_json
+
+    store = Store(tmp_path)
+    calls = []
+    asr = "mlx-community/whisper-large-v3-turbo"
+    llm = "mlx-community/Qwen3.5-27B-4bit"
+    for i, concern in enumerate(["I cannot afford this", "Is there installment interest"]):
+        cid = f"Csynthetic{i}"
+        calls.append({"call_id": cid, "lead_number": "synthetic", "lead_alias": "Ltest",
+                      "created_on": f"2026-01-0{i+1}T10:00:00", "duration_seconds": 60,
+                      "salesperson": "Test agent", "split": "development", "crm_conversion_flag": None,
+                      "call_number_in_export": i+1, "lead_name": "Test lead", "current_owner": "Test owner",
+                      "journey_outcome_label": "Outcome unknown"})
+        write_json(store.path("audio", cid + ".json"), {"sha256": cid, "duration_seconds": 60})
+        fingerprint = digest([cid, asr, LOCAL_REVISIONS[asr], ASR_VERSION])
+        transcript = {"model": asr, "model_revision": LOCAL_REVISIONS[asr], "version": ASR_VERSION,
+                      "fingerprint": fingerprint, "duration_seconds": 60,
+                      "segments": [{"id": n, "text": text, "start": n*10, "end": (n+1)*10}
+                                   for n, text in enumerate([concern, "Payment plans available", "That resolves it"])]}
+        write_json(store.path("transcripts", cid + ".json"), transcript)
+        ex = CallExtraction(summary="Synthetic affordability discussion", next_action="Clarify remaining concern", objections=[{
+             "category": "price", "concern": concern, "evidence": {"segment_id": 0, "quote": concern},
+             "response": "Payment plans available", "response_evidence": {"segment_id": 1, "quote": "Payment plans available"},
+             "resolution": "resolved" if i else "unresolved",
+             "resolution_evidence": {"segment_id": 2, "quote": "That resolves it"} if i else None}])
+        write_json(store.path("extractions", cid + ".json"), {"model": llm, "model_revision": LOCAL_REVISIONS[llm],
+                   "fingerprint": extraction_fingerprint(fingerprint, llm, LOCAL_REVISIONS[llm]),
+                   "transcript_fingerprint": fingerprint, "extraction": ex.model_dump(), "asr_flags": []})
+    write_json(store.path("selection.json"), {"sha256": "synthetic", "calls": calls})
+    result = export_tables(store)
+    worklist = read_json(store.path("exports", "worklist.json"))
+    evidence = read_json(store.path("exports", "evidence.json"))
+    assert result["complete_extracted_journeys"] == 1
+    assert "I cannot afford this" in worklist[0]["open_objections"]
+    assert "Is there installment interest" not in worklist[0]["open_objections"]
+    assert all(e["claim"] == "Payment plans available" for e in evidence if e["evidence_type"] == "response_evidence")

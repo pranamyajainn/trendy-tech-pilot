@@ -7,6 +7,7 @@ Read [the pilot scope](docs/pilot-scope.md) before running a batch.
 **Current stage: development calibration.** The software is implemented, but extraction accuracy has not
 passed the pilot gate. Qwen2.5 7B, Qwen3 8B and Qwen3.5 9B produced schema/evidence or meaning errors.
 The larger Qwen3.5 27B configuration is experimental and is not approved for bulk processing.
+Its three-call development trial also found evidence and meaning errors; see [calibration notes](docs/qa-protocol.md).
 Do not interpret a successful command, this repository, or exact-quote matching as completed pilot validation.
 
 ## Data flow
@@ -91,6 +92,8 @@ cannot be interpreted as a passed commercial gate. Automatic quote matching is n
 
 Tests cover complete-journey sampling, reproducibility, lead-disjoint holdouts, unknown outcomes, fabricated
 quotes, unsupported resolutions, chronology, contact suppression, retry accounting and spreadsheet injection.
+The GitHub Actions configuration is saved as `docs/ci-workflow.example.yml`. It is not active: the connected
+GitHub credential cannot write workflow files. Local lint and tests can run without that permission.
 
 ## Model references
 

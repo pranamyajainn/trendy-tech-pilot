@@ -33,6 +33,8 @@ def build(root):
     doc.styles["Title"].font.size = Pt(24)
     doc.styles["Heading 1"].font.size = Pt(15)
     doc.styles["Heading 2"].font.size = Pt(11)
+    for border in doc.styles.element.xpath(".//w:pBdr"):
+        border.getparent().remove(border)
     doc.core_properties.title = "TrendyTech call intelligence pilot review"
     doc.core_properties.author = "TrendyTech Pilot Team"
 
@@ -72,7 +74,7 @@ def build(root):
     para("TrendyTech call intelligence pilot review", "Title")
     para(datetime.now(ZoneInfo("Asia/Kolkata")).strftime("%d %B %Y") + "  |  Private review copy")
     para(f"We selected {overview['selected_calls']} recordings across {overview['selected_leads']} leads to test whether call history can produce useful sales guidance. "
-         f"This version contains {overview['analysed_calls']} extractions that passed automated evidence checks. "
+         f"Current extractions passing automated evidence checks: {overview['analysed_calls']}. "
          "Independent transcription and meaning checks remain pending. Treat the worklist as a review draft.")
     table(["Pilot measure", "Result"], [
         ["Calls with current extraction", f"{overview['analysed_calls']} / {overview['selected_calls']}"],
@@ -94,11 +96,12 @@ def build(root):
     para("Separate learner support from new sales follow-up. Confirm enrollment for records already flagged Yes in the CRM. For sales leads, review the evidence behind each concern and prepare the suggested next step before contacting them.")
     para("These recordings are historical. Confirm the lead's current status and any request to stop contact before using an old recommendation.")
 
-    doc.add_page_break()
-    para("Lead worklist examples", "Heading 1")
     complete = [w for w in worklist if w["calls_analysed"] == w["calls_in_export"]]
     rank = {"Do not contact": 0, "Hot signal": 1, "Warm signal": 2, "Cold signal": 3, "Service follow-up": 4}
     chosen = sorted(complete, key=lambda w: (rank.get(w["priority"], 5), w["lead_alias"]))[:5]
+    if chosen:
+        doc.add_page_break()
+        para("Lead worklist examples", "Heading 1")
     if not chosen:
         para("No journey has completed extraction yet. The workbook tracks the pending calls; no partial journey is presented as a finished sales assessment.")
     for w in chosen:

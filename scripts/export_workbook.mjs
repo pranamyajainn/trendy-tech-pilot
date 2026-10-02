@@ -30,10 +30,10 @@ function table(name, rows, keys, widths = {}) {
   const range = sheet.getRangeByIndexes(2, 0, matrix.length, keys.length);
   range.values = matrix;
   range.format.font = {name: 'Arial', size: 10};
-  range.format.rowHeight = 35;
+  range.format.rowHeight = 24;
   range.format.verticalAlignment = 'center';
   const header = sheet.getRangeByIndexes(2, 0, 1, keys.length);
-  header.format = {fill: '#183F35', font: {name: 'Arial', size: 10, color: '#FFFFFF', bold: true}, wrapText: true, rowHeight: 32};
+  header.format = {fill: '#243B53', font: {name: 'Arial', size: 10, color: '#FFFFFF', bold: true}, wrapText: true, rowHeight: 42};
   const bottom = matrix.length + 2;
   for (let i = 0; i < keys.length; i++) {
     const column = sheet.getRangeByIndexes(2, i, matrix.length, 1);
@@ -41,8 +41,9 @@ function table(name, rows, keys, widths = {}) {
     column.format.wrapText = true;
   }
   if (rows.length) {
-    sheet.tables.add(`A3:${col(keys.length - 1)}${bottom}`, true, name.replace(/[^A-Za-z]/g, '') + 'Data');
-    sheet.getRangeByIndexes(3, 0, rows.length, keys.length).format.rowHeight = name === 'Evidence' ? 68 : 78;
+    const tab = sheet.tables.add(`A3:${col(keys.length - 1)}${bottom}`, true, name.replace(/[^A-Za-z]/g, '') + 'Data');
+    tab.style = 'TableStyleLight1';
+    sheet.getRangeByIndexes(3, 0, rows.length, keys.length).format.autofitRows();
   }
   sheet.freezePanes.freezeRows(3);
   return sheet;
@@ -66,12 +67,12 @@ const counts = [
 ];
 table('Pilot readout', counts, ['item', 'value'], {item: 46, value: 105});
 table('Worklist', worklist, ['lead_alias', 'lead_number', 'current_owner', 'priority', 'as_of_recorded_call', 'goal', 'open_objections', 'objection_history_note', 'next_action_suggestion', 'calls_analysed', 'calls_in_export', 'outcome'],
-  {goal: 38, open_objections: 65, next_action_suggestion: 75, outcome: 40});
-table('Journey review', worklist, ['lead_alias', 'total_call_minutes_crm', 'mean_gap_days', 'strengths', 'weaknesses_or_unknowns', 'opportunity', 'threats', 'conflicting_profile_fields', 'effort_review', 'journey_coverage', 'split'],
+  {goal: 38, open_objections: 65, objection_history_note: 50, next_action_suggestion: 75, outcome: 40});
+table('Journey review', worklist, ['lead_alias', 'calls_analysed', 'calls_in_export', 'total_call_minutes_crm', 'mean_gap_days', 'strengths', 'weaknesses_or_unknowns', 'opportunity', 'threats', 'conflicting_profile_fields', 'effort_review', 'journey_coverage', 'split'],
   {strengths: 60, weaknesses_or_unknowns: 36, opportunity: 55, threats: 35, journey_coverage: 45});
 table('Lead profiles', profiles, ['lead_alias', 'current_role', 'experience', 'company', 'location', 'current_ctc', 'target_role', 'technology_interest', 'course', 'goal', 'timeline', 'budget', 'availability', 'conflicting_fields'],
   {goal: 55, timeline: 38, technology_interest: 35});
-table('Calls', calls, ['lead_alias', 'call_id', 'call_number_in_export', 'created_on', 'salesperson', 'duration_seconds_audio', 'conversation_type', 'processing_status', 'summary', 'objections', 'next_action_suggestion', 'qualification', 'discovery', 'pitch', 'objection_handling', 'script_adherence', 'closing', 'asr_flags', 'uncertainties', 'split'],
+table('Calls', calls, ['lead_alias', 'call_id', 'source_excel_row', 'call_number_in_export', 'created_on', 'salesperson', 'duration_seconds_audio', 'conversation_type', 'processing_status', 'summary', 'objections', 'next_action_suggestion', 'qualification', 'discovery', 'pitch', 'objection_handling', 'script_adherence', 'closing', 'asr_flags', 'uncertainties', 'split'],
   {summary: 85, objections: 65, next_action_suggestion: 70, processing_status: 38, uncertainties: 60, script_adherence: 40});
 table('Evidence', evidence, ['lead_alias', 'call_id', 'collection', 'field', 'evidence_type', 'claim', 'quote', 'start_seconds', 'end_seconds', 'segment_id', 'review_status'],
   {claim: 65, quote: 95, review_status: 38});

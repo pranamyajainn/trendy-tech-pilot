@@ -105,10 +105,14 @@ def export_tables(store):
         for c in group:
             result = analyses.get(c["call_id"])
             record = {"lead_alias": c["lead_alias"], "lead_number": lead, "call_id": c["call_id"],
+                      "source_excel_row": c.get("source_row"),
                       "call_number_in_export": c["call_number_in_export"], "created_on": c["created_on"],
                       "duration_seconds_crm": c["duration_seconds"], "salesperson": c["salesperson"],
                       "split": c["split"], "crm_conversion_flag": c["crm_conversion_flag"],
                       "processing_status": "Pending or failed extraction"}
+            audio_path = store.path("audio", c["call_id"] + ".json")
+            if audio_path.exists():
+                record["duration_seconds_audio"] = read_json(audio_path)["duration_seconds"]
             if result:
                 ex = result["extraction"]
                 record.update({"processing_status": "Evidence checked; semantic QA pending",
@@ -170,6 +174,7 @@ def export_tables(store):
         dates = [datetime.fromisoformat(c["created_on"]) for c in group]
         gaps = [(b - a).total_seconds() / 86400 for a, b in pairwise(dates)]
         effort = "Review effort" if call_minutes >= 30 and len(open_objections) >= 2 and not signals_all & {"payment_intent", "payment_claim"} else "No rule triggered"
+        incomplete = len(lead_analyses) != len(group)
         profile_rows.append({"lead_alias": group[0]["lead_alias"], "lead_number": lead, **facts,
                              "conflicting_fields": "; ".join(k for k, v in history.items() if len(v) > 1)})
         worklist.append({"lead_alias": group[0]["lead_alias"], "lead_number": lead,
@@ -187,11 +192,11 @@ def export_tables(store):
                          "objection_history_note": "Unresolved in its source call; later resolution requires cross-call review",
                          "next_action_suggestion": next_action,
                          "strengths": "; ".join(dict.fromkeys(strengths))[:1200],
-                         "weaknesses_or_unknowns": "; ".join(k for k in ["goal", "timeline", "budget"] if k not in facts) or "No missing key discovery fields detected",
-                         "opportunity": "Address the documented concern and agree a specific next step" if open_objections else "Confirm current need and readiness before proposing a next step",
-                         "threats": "; ".join(o["category"] for o, _ in open_objections) or "No explicit unresolved objection extracted",
+                         "weaknesses_or_unknowns": "Analysis incomplete" if incomplete else "; ".join(k for k in ["goal", "timeline", "budget"] if k not in facts) or "No missing key discovery fields detected",
+                         "opportunity": "Complete the journey review" if incomplete else "Address the documented concern and agree a specific next step" if open_objections else "Confirm current need and readiness before proposing a next step",
+                         "threats": "Not assessed: journey extraction incomplete" if incomplete else "; ".join(o["category"] for o, _ in open_objections) or "No explicit unresolved objection extracted",
                          "conflicting_profile_fields": "; ".join(k for k, v in history.items() if len(v) > 1),
-                         "effort_review": effort, "journey_coverage": "All calls in provided export; lifetime completeness unconfirmed",
+                         "effort_review": "Not assessed: journey extraction incomplete" if incomplete else effort, "journey_coverage": "All calls in provided export; lifetime completeness unconfirmed",
                          "review_status": "Requires human review"})
     overview = {"selected_calls": len(calls), "selected_leads": len(groups), "analysed_calls": len(analyses),
                 "complete_extracted_journeys": sum(w["calls_analysed"] == w["calls_in_export"] for w in worklist),

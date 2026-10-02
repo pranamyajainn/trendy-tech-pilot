@@ -44,3 +44,14 @@ promoting those configurations; it is not an estimated error rate for the whole 
 
 The local Whisper route is running; speed results alone do not establish its transcription accuracy.
 An optional paid extraction fallback is disabled unless the owner opts in and configures a local key.
+
+On 2 October 2026, Qwen3.5 9B and then the 27B 4-bit model were also tested locally. The 27B model
+completed three development calls: two passed schema/quote checks, one failed quote validation twice.
+One of the two technically valid outputs was rejected during transcript-only meaning review because a
+course-completion request was classified as a career goal. The other is a provisional support-call example,
+not an accuracy benchmark. These three support calls do not estimate performance over the whole pilot.
+
+The 27B run recorded about 16.56 GB peak MLX memory and roughly 2.0–2.8 generated tokens per second.
+The first call took 264.8 seconds including prompt processing; one failed call consumed two attempts.
+It fits this machine, but this configuration is not approved for bulk extraction. No paid API requests
+were made during these experiments. Raw outputs and rejection notes are retained only in private data.
