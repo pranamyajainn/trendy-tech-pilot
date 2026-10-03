@@ -147,3 +147,18 @@ def test_invalid_request_is_not_retried(tmp_path, monkeypatch):
     with pytest.raises(httpx.HTTPStatusError):
         extractor.generate("system", "transcript")
     assert len(calls) == 1
+
+
+def test_concurrent_reservations_both_count_against_the_cap(tmp_path, monkeypatch):
+    from trendytech_pilot.budget import Budget, BudgetExceeded
+    monkeypatch.setenv("PILOT_API_CAP_INR", "10")
+    budget = Budget(Store(tmp_path))
+    with budget.reserve(6) as first:
+        # A second request while the first is in flight sees the first reservation.
+        with pytest.raises(BudgetExceeded), budget.reserve(6):
+            pass
+        with budget.reserve(3) as second:
+            second.settle(1)
+        first.settle(2)
+    state = read_json(budget.path)
+    assert state["committed_inr"] == pytest.approx(3) and len(state["requests"]) == 2
