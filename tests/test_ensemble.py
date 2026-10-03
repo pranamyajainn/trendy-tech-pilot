@@ -136,7 +136,7 @@ def test_failed_verification_reuses_the_cached_extraction_on_retry(tmp_path, mon
             return json.dumps(body), {}
 
     class QuotaVerifier:
-        model_id = "gemini-3.1-pro-preview"
+        model_id = "gemini-3.5-flash"
 
         def generate(self, *args, **kwargs):
             raise httpx.HTTPStatusError("quota", request=httpx.Request("POST", "https://x"), response=httpx.Response(429))

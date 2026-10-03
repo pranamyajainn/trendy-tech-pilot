@@ -144,9 +144,9 @@ def main():
         print(json.dumps(export_qa(store), indent=2))
     elif args.command == "lead-actions":
         from .client import journeys, lead_action
-        from .ensemble import GeminiProVerifier
+        from .ensemble import GeminiVerifier
 
-        model, failures = GeminiProVerifier(store), []
+        model, failures = GeminiVerifier(store), []
         leads = journeys(store, selected_calls(store, "all"))
         for i, journey in enumerate(leads.values(), 1):
             try:
@@ -175,9 +175,9 @@ def main():
             worker = GeminiResolver(store)
         elif args.command == "extract":
             if provider == "verified":
-                from .ensemble import GeminiProVerifier
+                from .ensemble import GeminiVerifier
                 from .remote import GeminiExtractor
-                worker = (GeminiExtractor(store), GeminiProVerifier(store))
+                worker = (GeminiExtractor(store), GeminiVerifier(store))
             elif provider == "gemini":
                 from .remote import GeminiExtractor
                 worker = GeminiExtractor(store)

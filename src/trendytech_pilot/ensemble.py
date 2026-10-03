@@ -1,4 +1,4 @@
-"""Verified extraction: Gemini Flash extracts and a stronger model, Gemini 3.1 Pro, checks every claim.
+"""Verified extraction: Gemini 3.8 Flash extracts and a different model, Gemini 3.5 Flash, checks every claim.
 
 Verification decides which claims enter the findings and routes the rest to human review. It does not measure
 accuracy: both models come from one family and can share errors, so only the human audit can estimate it.
@@ -60,19 +60,20 @@ PRO_GENERATION = {"endpoint": ENDPOINT, "temperature": 1.0, "reasoning_effort": 
                   "response_schema_sha256": digest(VERIFY_SCHEMA)}
 
 
-class GeminiProVerifier(GeminiExtractor):
-    # Published rates observed 3 Oct 2026 (prompts up to 200k tokens): USD 2.00 input, 12.00 output incl. thinking.
+class GeminiVerifier(GeminiExtractor):
+    # Gemini Pro was the first choice but is capped at 250 requests per day on this account (3 Oct 2026).
+    # Published rates observed 3 Oct 2026: USD 1.50 input, 9.00 output incl. thinking per 1M tokens.
     # https://ai.google.dev/gemini-api/docs/pricing
-    model_id = "gemini-3.1-pro-preview"
-    input_usd_per_million = 2.0
-    output_usd_per_million = 12.0
+    model_id = "gemini-3.5-flash"
+    input_usd_per_million = 1.5
+    output_usd_per_million = 9.0
     generation = PRO_GENERATION
 
 
-VERIFIED_MODEL = f"verified:{GeminiExtractor.model_id}+{GeminiProVerifier.model_id}"
+VERIFIED_MODEL = f"verified:{GeminiExtractor.model_id}+{GeminiVerifier.model_id}"
 # Part of the extraction identity and method freeze, through extract.generation_config.
 VERIFIED_GENERATION = {"extractor": {"model": GeminiExtractor.model_id, **GEMINI_GENERATION},
-                       "verifier": {"model": GeminiProVerifier.model_id, **GeminiProVerifier.generation},
+                       "verifier": {"model": GeminiVerifier.model_id, **GeminiVerifier.generation},
                        "verify_system_sha256": digest(VERIFY_SYSTEM), "merge_version": "verified-merge-v1"}
 
 

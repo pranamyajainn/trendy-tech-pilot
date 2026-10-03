@@ -67,13 +67,17 @@ def resolver(tmp_path, monkeypatch, decisions):
     store = Store(tmp_path)
     write_json(store.path("audio", "Ctest.json"), {"file": "synthetic.wav", "duration_seconds": 10})
     body = {"speakers": [{"label": "sarvam:0", "role": "agent"}], "spans": decisions}
+    sent = []
 
     def respond(request):
+        sent.append(json.loads(request.content))
         return httpx.Response(200, json={"usageMetadata": {"promptTokenCount": 900, "candidatesTokenCount": 80,
                                                            "thoughtsTokenCount": 300},
                                          "candidates": [{"finishReason": "STOP", "content": {"parts": [
                                              {"text": "reasoning", "thought": True}, {"text": json.dumps(body)}]}}]})
-    return GeminiResolver(store, httpx.Client(transport=httpx.MockTransport(respond))), store
+    res = GeminiResolver(store, httpx.Client(transport=httpx.MockTransport(respond)))
+    res.sent = sent
+    return res, store
 
 
 def test_resolver_writes_consensus_and_settles_reported_usage(tmp_path, monkeypatch):
@@ -84,7 +88,7 @@ def test_resolver_writes_consensus_and_settles_reported_usage(tmp_path, monkeypa
     assert artifact["segments"][-1]["text"] == "see you tuesday"
     [entry] = read_json(store.path("api-budget.json"))["requests"].values()
     assert entry["status"] == "usage_reported" and entry["inr"] == pytest.approx(res.cost(900, 380))
-    assert artifact["model"] == "gemini-3.1-pro-preview"  # Disputed audio goes to Pro.
+    assert artifact["model"] == "gemini-3.5-flash" and "inlineData" in json.dumps(res.sent[0])  # The judge hears audio.
 
 
 def test_resolver_rejects_an_incomplete_decision_list(tmp_path, monkeypatch):
@@ -95,11 +99,9 @@ def test_resolver_rejects_an_incomplete_decision_list(tmp_path, monkeypatch):
     assert not store.path("asr", "consensus", "Ctest.json").exists()
 
 
-def test_roles_without_disputes_are_mapped_by_the_cheaper_model(tmp_path, monkeypatch):
-    res, store = resolver(tmp_path, monkeypatch, [])
+def test_roles_without_disputes_send_no_audio(tmp_path, monkeypatch):
+    res, _store = resolver(tmp_path, monkeypatch, [])
     agreeing = {**SARVAM, "text": "hello there two clubs data bricks lab fine thanks see you"}
     artifact = res.resolve({"call_id": "Ctest"}, {"fingerprint": "whisper", "segments": SEGMENTS},
                            {**GEMINI, "text": agreeing["text"]}, agreeing)
-    assert artifact["disputed_spans"] == 0 and artifact["model"] == "gemini-3.8-flash"
-    [entry] = read_json(store.path("api-budget.json"))["requests"].values()
-    assert entry["inr"] == pytest.approx(res.cost(900, 380, "gemini-3.8-flash"))
+    assert artifact["disputed_spans"] == 0 and "inlineData" not in json.dumps(res.sent[0])

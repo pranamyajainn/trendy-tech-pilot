@@ -58,7 +58,9 @@ time (times are approximate, within a few seconds) and decide which candidate ma
 For each speaker label, say whether it is the company agent, the prospect or learner, another person (for
 example a voicemail system or a third participant), or unknown, using the sample lines.
 Return JSON only."""
-RESOLVER = {"model": "gemini-3.1-pro-preview", "roles_model": "gemini-3.8-flash", "version": "resolver-v4",
+# Gemini 3.5 Flash judges: a different model from Gemini 3.8 Flash, which wrote one of the candidates. Gemini Pro
+# was used first but is capped at 250 requests per day on this account (3 Oct 2026).
+RESOLVER = {"model": "gemini-3.5-flash", "roles_model": "gemini-3.5-flash", "version": "resolver-v5",
             "threshold": 0.9,
             "thinking": "low", "instructions_sha256": digest(INSTRUCTIONS), "audio": "ogg/opus 24 kbps mono",
             "systems": {"gemini": GEMINI_ASR["version"], "sarvam": SARVAM_ASR["version"]}}
@@ -179,7 +181,7 @@ def build_consensus(call_id, segments, rows, spans, resolution, speaker_by_segme
 
 # Published rates observed 3 Oct 2026, USD per 1M input/output tokens (output incl. thinking).
 # https://ai.google.dev/gemini-api/docs/pricing
-RATES = {"gemini-3.1-pro-preview": (2.0, 12.0), "gemini-3.8-flash": (0.75, 3.75)}
+RATES = {"gemini-3.1-pro-preview": (2.0, 12.0), "gemini-3.8-flash": (0.75, 3.75), "gemini-3.5-flash": (1.5, 9.0)}
 
 
 class GeminiResolver:
@@ -234,8 +236,8 @@ class GeminiResolver:
         return artifact
 
     def _ask(self, cid, spans, turns, start):
-        """Pro listens to the audio when spans are disputed; mapping speaker labels to roles from sample lines
-        alone is a text task for Flash, which keeps Pro's daily quota for audio decisions."""
+        """The judge listens to the audio when spans are disputed; without disputed spans only speaker roles are
+        mapped, from sample lines, and no audio is sent."""
         model = RESOLVER["model"] if spans else RESOLVER["roles_model"]
         prompt = resolver_prompt(cid, spans, turns)
         meta = read_json(self.store.path("audio", cid + ".json"))
