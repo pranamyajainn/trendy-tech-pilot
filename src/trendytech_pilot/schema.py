@@ -67,20 +67,45 @@ class CallExtraction(StrictModel):
     uncertainties: list[str] = Field(default_factory=list, max_length=10)
 
 
+# Evidence acceptance rules are part of the extraction identity and method freeze.
+EVIDENCE_RULES_VERSION = "evidence-v2"
+FILLERS = {"uh", "uhh", "um", "umm", "hmm", "ah", "er", "erm"}
+
+
 def normalise(text):
-    return re.sub(r"\s+", " ", text).strip().casefold()
+    # Sentence punctuation and spoken fillers carry no evidence; decimal points, hyphens and apostrophes do.
+    text = re.sub(r"[,!?;:\"“”()]|\.(?!\d)", " ", text.casefold())
+    return " ".join(word for word in text.split() if word not in FILLERS)
+
+
+def quote_supported(quote, segment_id, texts, order):
+    """The quote lies in the cited segment or runs from it into an adjacent one, because ASR splits
+    sentences mid-way. A quote found only in a neighbour is a wrong citation and fails."""
+    quote = normalise(quote)
+    if segment_id not in texts or not quote:
+        return False
+    cited = normalise(texts[segment_id])
+    if quote in cited:
+        return True
+    position = order.index(segment_id)
+    for neighbour in order[max(position - 1, 0):position] + order[position + 1:position + 2]:
+        other = normalise(texts[neighbour])
+        joined = f"{other} {cited}" if neighbour < segment_id else f"{cited} {other}"
+        if quote in joined and quote not in other:
+            return True
+    return False
 
 
 def validate_evidence(extraction, transcript):
     """Reject invented/mislocated quotes. Support does not prove semantic correctness."""
-    segments = {s["id"]: s for s in transcript["segments"]}
+    texts = {s["id"]: s["text"] for s in transcript["segments"]}
+    order = [s["id"] for s in transcript["segments"]]
     errors = []
 
     def check(evidence, location):
         if evidence is None:
             return
-        segment = segments.get(evidence["segment_id"])
-        if segment is None or normalise(evidence["quote"]) not in normalise(segment["text"]):
+        if not quote_supported(evidence["quote"], evidence["segment_id"], texts, order):
             errors.append(location)
 
     data = extraction.model_dump() if isinstance(extraction, CallExtraction) else extraction

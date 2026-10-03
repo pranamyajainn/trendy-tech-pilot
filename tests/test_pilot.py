@@ -3,7 +3,12 @@ import json
 import pytest
 
 from trendytech_pilot.cli import freeze_method, selected_calls, verify_freeze
-from trendytech_pilot.extract import LOCAL_GENERATION, extraction_fingerprint, parse_json_response
+from trendytech_pilot.extract import (
+    LOCAL_GENERATION,
+    evidence_error_message,
+    extraction_fingerprint,
+    parse_json_response,
+)
 from trendytech_pilot.ingest import duration_seconds, outcome_flag, select_sample
 from trendytech_pilot.quality import word_error_rate
 from trendytech_pilot.remote import GeminiExtractor
@@ -65,6 +70,37 @@ def test_exact_evidence_is_required_and_resolution_needs_acceptance():
     assert validate_evidence(ex, transcript) == []
     ex.objections[0].evidence.quote = "I will pay today"
     assert validate_evidence(ex, transcript) == ["objections[0].evidence"]
+
+
+def fact_errors(transcript, segment_id, quote):
+    ex = CallExtraction(summary="", next_action="", facts=[{"field": "budget", "value": "synthetic",
+                        "evidence": {"segment_id": segment_id, "quote": quote}}])
+    return validate_evidence(ex, transcript)
+
+
+def test_quote_may_run_into_an_adjacent_segment_but_not_live_only_in_one():
+    transcript = {"segments": [{"id": 0, "text": "Let's come to"}, {"id": 1, "text": "the fee structure directly."},
+                               {"id": 3, "text": "It is 4.5 lakh."}]}
+    assert fact_errors(transcript, 0, "Let's come to the fee structure") == []
+    assert fact_errors(transcript, 1, "come to the fee structure") == []
+    assert fact_errors(transcript, 3, "directly. It is 4.5 lakh") == []  # neighbour by order, despite the id gap
+    assert fact_errors(transcript, 0, "the fee structure directly") == ["facts[0].evidence"]  # wrong citation
+    assert fact_errors(transcript, 3, "It is 45 lakh") == ["facts[0].evidence"]  # a decimal point is content
+
+
+def test_fillers_and_punctuation_are_ignored_but_corrected_words_are_not():
+    transcript = {"segments": [{"id": 0, "text": "like uh data engineer, but uh mostly on-prem. I think 38 may works"}]}
+    assert fact_errors(transcript, 0, "data engineer but mostly on-prem") == []
+    assert fact_errors(transcript, 0, "I think 30th May works") == ["facts[0].evidence"]
+    assert fact_errors(transcript, 0, "uh") == ["facts[0].evidence"]  # a filler alone supports nothing
+
+
+def test_evidence_retry_message_shows_the_cited_segment_text():
+    transcript = {"segments": [{"id": 3, "text": "i think 38 may should be suitable"}]}
+    ex = CallExtraction(summary="", next_action="", facts=[{"field": "timeline", "value": "30 May",
+                        "evidence": {"segment_id": 3, "quote": "30th May should be suitable"}}])
+    message = evidence_error_message(ex.model_dump(), transcript, validate_evidence(ex, transcript))
+    assert "facts[0].evidence cites segment 3" in message and "i think 38 may should be suitable" in message
 
 
 def test_invented_segment_is_rejected():

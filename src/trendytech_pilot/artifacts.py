@@ -3,6 +3,7 @@
 from .audio import ASR_VERSION
 from .extract import PROMPT_VERSION, SYSTEM, extraction_fingerprint, generation_config
 from .models import LOCAL_REVISIONS
+from .schema import EVIDENCE_RULES_VERSION
 from .storage import digest, read_json
 
 
@@ -44,6 +45,7 @@ def current_extraction(store, call_id):
         frozen = read_json(frozen_path)
         if (artifact["model"] != frozen["llm_model"] or revision != frozen.get("llm_revision")
                 or frozen.get("prompt_version") != PROMPT_VERSION or frozen.get("prompt_sha256") != digest(SYSTEM)
-                or frozen.get("generation") != generation_config(artifact["model"])):
+                or frozen.get("generation") != generation_config(artifact["model"])
+                or frozen.get("evidence_rules") != EVIDENCE_RULES_VERSION):
             return None
     return artifact

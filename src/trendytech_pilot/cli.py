@@ -21,13 +21,14 @@ def freeze_method(store, asr_model, llm_model):
     from .audio import ASR_VERSION
     from .extract import PROMPT_VERSION, SYSTEM, generation_config
     from .models import LOCAL_REVISIONS
+    from .schema import EVIDENCE_RULES_VERSION
 
     selection = read_json(store.path("selection.json"))
     method = {"selection_sha256": selection["sha256"], "asr_model": asr_model, "llm_model": llm_model,
               "llm_revision": LOCAL_REVISIONS.get(llm_model),
               "asr_revision": LOCAL_REVISIONS.get(asr_model),
               "asr_version": ASR_VERSION, "prompt_version": PROMPT_VERSION, "prompt_sha256": digest(SYSTEM),
-              "generation": generation_config(llm_model)}
+              "generation": generation_config(llm_model), "evidence_rules": EVIDENCE_RULES_VERSION}
     path = store.path("method-freeze.json")
     if path.exists() and read_json(path) != method:
         raise ValueError("Method already frozen. Changing it would invalidate this holdout evaluation.")

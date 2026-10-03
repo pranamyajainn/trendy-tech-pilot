@@ -11,13 +11,15 @@ from trendytech_pilot.experiments import completed_experiment_exists
 from trendytech_pilot.extract import (
     PROMPT_VERSION,
     SYSTEM,
+    evidence_error_message,
+    extraction_fingerprint,
     extraction_user_prompt,
     generation_config,
     parse_json_response,
     retry_feedback,
 )
 from trendytech_pilot.remote import BudgetExceeded, GeminiExtractor
-from trendytech_pilot.schema import validate_evidence
+from trendytech_pilot.schema import EVIDENCE_RULES_VERSION, validate_evidence
 from trendytech_pilot.storage import Store, digest, read_json, write_json
 
 EXPERIMENT = "gemini-production-prompt-v1"
@@ -41,13 +43,14 @@ def main():
     extractor = GeminiExtractor(store)
     generation = generation_config(extractor.model_id)
     for cid, transcript in transcripts.items():
-        fingerprint = digest([transcript["fingerprint"], extractor.model_id, PROMPT_VERSION, SYSTEM, generation])
+        # The production identity plus the experiment tag, so trials and production cannot drift apart.
+        fingerprint = digest([extraction_fingerprint(transcript["fingerprint"], extractor.model_id, None), EXPERIMENT])
         path = store.path("experiments", f"{cid}-gemini-{fingerprint[:12]}.json")
         if completed_experiment_exists(path):
             print(cid, "already tested", flush=True)
             continue
         result = {"call_id": cid, "fingerprint": fingerprint, "experiment": EXPERIMENT, "model": extractor.model_id,
-                  "prompt_version": PROMPT_VERSION, "generation": generation,
+                  "prompt_version": PROMPT_VERSION, "generation": generation, "evidence_rules": EVIDENCE_RULES_VERSION,
                   "transcript_fingerprint": transcript["fingerprint"], "semantic_accuracy": "not_assessed",
                   "status": "failed", "attempts": []}
         user, feedback = extraction_user_prompt(transcript), ""
@@ -64,7 +67,7 @@ def main():
                     parsed = parse_json_response(raw)
                     errors = validate_evidence(parsed, transcript)
                     if errors:
-                        raise ValueError("Unsupported evidence: " + ", ".join(errors[:8]))
+                        raise ValueError(evidence_error_message(parsed.model_dump(), transcript, errors))
                 except (ValidationError, ValueError) as exc:
                     record["error"] = str(exc)
                     feedback = retry_feedback(str(exc))
