@@ -33,14 +33,29 @@ These deliberately selected development cases diagnose failure modes. Their pass
 estimate for the 300-call sample. Reference matching is not independent transcription or extraction QA.
 Source text, call identifiers, raw outputs and detailed review notes remain private.
 
-## Next decision
+## Hosted extraction (Gemini), 3 October 2026
 
-The owner has approved testing a hosted text extractor with an INR 500 processing cap; the local API key
-is still pending. Keep audio transcription local. The prepared Gemini fallback reserves estimated cost before each request, retains
-uncertain reservations, and limits the configured processing budget to INR 500 or less. It remains disabled.
-Do not claim the full pilot is client-ready, a cost gate is passed, or conversion predictions are validated.
+The owner approved hosted text extraction within an INR 500 cap and the client confirmed any model type may be
+used. Audio transcription stays local. The route uses `gemini-3.8-flash` through Google's OpenAI-compatible endpoint.
+
+- Integration: the endpoint rejected the strict pydantic schema (HTTP 400). A provider-safe schema is now sent;
+  the full schema is still validated locally. Busy 429/503 responses are retried under one budget reservation.
+- 20-call development trial: meaning was correct on the traps the local models failed (agent suggestions vs
+  prospect facts, split payment vs discount, discount checks vs promises, quoted fee vs budget, notice period vs
+  enrollment timing). All quote failures were genuine quotes crossing an ASR segment boundary or dropping a
+  filler word; evidence rules `evidence-v2` accept those while still rejecting corrected words and wrong citations.
+- Full development runs: 238/238 calls passed schema and evidence validation. Review led to prompt v7 (field
+  definitions) and v8 (bare acknowledgements are not resolution; one record per concern) and `evidence-v3`
+  (service calls cannot carry sales content). After v8, all resolved objections showed explicit acceptance.
+- Stability: between two runs, call type agreed on 219/238 calls and sales vs non-sales on 230/238. Flips are
+  borderline short calls.
+- Cost: about INR 0.3 for a short call and INR 1.4 for a 20-minute call at the budgeting rates in `remote.py`.
+
+The method was frozen after this transcript-only development review. It is not an independent accuracy
+measurement; the holdout review provides that. Do not claim the commercial gate has passed or that conversion
+predictions are validated.
 
 Generation settings were checked against the official
 [Qwen3.5 model card](https://huggingface.co/Qwen/Qwen3.5-9B#best-practices).
-The optional fallback's rates were rechecked against
+The Gemini route's rates were rechecked against
 [Google's pricing](https://ai.google.dev/gemini-api/docs/pricing) on 3 October 2026.

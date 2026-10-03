@@ -4,21 +4,16 @@ Implementation of the approximately 300-call, 50-lead extraction pilot in propos
 The deliverable is a structured workbook, a findings report and a mini worklist. There is no new dashboard.
 Read [the pilot scope](docs/pilot-scope.md) before running a batch.
 
-**Current stage: development calibration.** The software is implemented, but extraction accuracy has not
-passed the pilot gate. Qwen2.5 7B, Qwen3 8B and Qwen3.5 9B produced schema/evidence or meaning errors.
-The larger Qwen3.5 27B configuration is experimental and is not approved for bulk processing.
-Its three-call development trial also found evidence and meaning errors; see [calibration notes](docs/qa-protocol.md).
-Do not interpret a successful command, this repository, or exact-quote matching as completed pilot validation.
-
-As of 3 October 2026, all 300 recordings are downloaded and the 238 development recordings are transcribed.
-The 62 held-out calls remain reserved until the extraction method is frozen. Additional segment-reference,
-recommended-sampling, reasoning and staged local experiments have not passed development meaning review.
-See [the local evaluation record](docs/local-evaluation.md). None is promoted to the production CLI.
+**Current stage: holdout evaluation.** Local Qwen models (7B to 27B) failed development meaning review.
+Text extraction moved to Gemini (`gemini-3.8-flash`, prompt `extraction-v8`, evidence rules `evidence-v3`), which
+passed a transcript-level development review of all 238 development calls; the method was frozen on 3 October 2026.
+Independent audio-level accuracy is measured only by the holdout review; see [the QA protocol](docs/qa-protocol.md)
+and [the evaluation record](docs/local-evaluation.md). Exact-quote matching is not semantic accuracy.
 
 ## Data flow
 
 Client Excel → audit → frozen sample and lead-level QA split → recording downloads → local Whisper
-transcripts → local Qwen structured extraction → exact-quote checks → lead journeys and worklist → QA and cost report.
+transcripts → Gemini structured extraction → quote checks → lead journeys and worklist → QA and cost report.
 
 The source workbook, recordings, transcripts, model responses, quarantine files, contact details and outputs
 live under ignored `data/`. This is a public code repository: never force-add client artifacts.
@@ -78,7 +73,9 @@ extraction fingerprint and the method freeze, so changing them makes earlier out
 ## Outputs and interpretation
 
 - `data/exports/worklist.csv`: one row per lead, as of its last exported call; suggested next steps and opportunity SWOT.
-- `data/exports/calls.csv`: call-level extraction and provisional coverage of five call-quality dimensions.
+- `data/exports/calls.csv`: call-level extraction and provisional coverage of six call-quality dimensions
+  (script adherence is always unavailable).
+- `data/exports/findings.json`, `objection_summary.csv`, `signal_summary.csv`: sample-level counts with traceable examples.
 - `data/exports/evidence.csv`: exact transcript quotations with call IDs and timestamps.
 - `data/exports/overview.json`: coverage and explicitly bounded cost metrics.
 - `data/qa/`: full-call independent references and field review templates. Empty unreviewed references never produce accuracy scores. Explicitly reviewed silence can count hallucinated insertions.
