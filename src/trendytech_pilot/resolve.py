@@ -58,7 +58,8 @@ time (times are approximate, within a few seconds) and decide which candidate ma
 For each speaker label, say whether it is the company agent, the prospect or learner, another person (for
 example a voicemail system or a third participant), or unknown, using the sample lines.
 Return JSON only."""
-RESOLVER = {"model": "gemini-3.1-pro-preview", "version": "resolver-v3-sarvam-roles", "threshold": 0.9,
+RESOLVER = {"model": "gemini-3.1-pro-preview", "roles_model": "gemini-3.8-flash", "version": "resolver-v4",
+            "threshold": 0.9,
             "thinking": "low", "instructions_sha256": digest(INSTRUCTIONS), "audio": "ogg/opus 24 kbps mono",
             "systems": {"gemini": GEMINI_ASR["version"], "sarvam": SARVAM_ASR["version"]}}
 SCHEMA = provider_schema(Resolution.model_json_schema())
@@ -176,11 +177,13 @@ def build_consensus(call_id, segments, rows, spans, resolution, speaker_by_segme
     return out, dropped
 
 
+# Published rates observed 3 Oct 2026, USD per 1M input/output tokens (output incl. thinking).
+# https://ai.google.dev/gemini-api/docs/pricing
+RATES = {"gemini-3.1-pro-preview": (2.0, 12.0), "gemini-3.8-flash": (0.75, 3.75)}
+
+
 class GeminiResolver:
-    # Published rates observed 3 Oct 2026 (prompts up to 200k tokens): input incl. audio USD 2.00, output incl.
-    # thinking USD 12.00 per 1M tokens. https://ai.google.dev/gemini-api/docs/pricing
     model_id = RESOLVER["model"]
-    input_usd_per_million, output_usd_per_million = 2.0, 12.0
     max_output_tokens = 16384
     busy_retry_delays = (5, 15, 45)
 
@@ -194,8 +197,9 @@ class GeminiResolver:
         self.client = client or httpx.Client(timeout=600)
         self.fx_with_buffer = 125.0
 
-    def cost(self, input_tokens, output_tokens):
-        return (input_tokens * self.input_usd_per_million + output_tokens * self.output_usd_per_million) / 1e6 * self.fx_with_buffer
+    def cost(self, input_tokens, output_tokens, model=RESOLVER["model"]):
+        rate_in, rate_out = RATES[model]
+        return (input_tokens * rate_in + output_tokens * rate_out) / 1e6 * self.fx_with_buffer
 
     def resolve(self, call, whisper, gemini, sarvam, force=False):
         cid = call["call_id"]
@@ -224,11 +228,15 @@ class GeminiResolver:
                     "speaker_roles": {s.label: s.role for s in resolution.speakers}, "dropped_segments": dropped,
                     "segments": consensus, **usage}
         write_json(path, artifact)
-        self.store.event(stage="resolve", call_id=cid, model=self.model_id, status="success", fingerprint=fingerprint,
-                         disputed_spans=len(spans), wall_seconds=time.monotonic() - start, external_cost_inr=cost, **usage)
+        self.store.event(stage="resolve", call_id=cid, status="success", fingerprint=fingerprint,
+                         disputed_spans=len(spans), wall_seconds=time.monotonic() - start, external_cost_inr=cost,
+                         **{"model": self.model_id, **usage})
         return artifact
 
     def _ask(self, cid, spans, turns, start):
+        """Pro listens to the audio when spans are disputed; mapping speaker labels to roles from sample lines
+        alone is a text task for Flash, which keeps Pro's daily quota for audio decisions."""
+        model = RESOLVER["model"] if spans else RESOLVER["roles_model"]
         prompt = resolver_prompt(cid, spans, turns)
         meta = read_json(self.store.path("audio", cid + ".json"))
         # Speaker roles alone can be judged from sample lines; audio is needed only for disputed spans.
@@ -240,10 +248,10 @@ class GeminiResolver:
         audio_tokens = meta["duration_seconds"] * 32 if spans else 0
         cost = 0.0
         try:
-            with self.budget.reserve(self.cost(audio_tokens + len(prompt.encode()) + 1024, self.max_output_tokens),
-                                     call_id=cid, purpose="resolve:" + self.model_id) as reservation:
+            with self.budget.reserve(self.cost(audio_tokens + len(prompt.encode()) + 1024, self.max_output_tokens, model),
+                                     call_id=cid, purpose="resolve:" + model) as reservation:
                 response, retries = post_with_busy_retries(
-                    self.client, URL.format(model=self.model_id), reservation, self.busy_retry_delays,
+                    self.client, URL.format(model=model), reservation, self.busy_retry_delays,
                     headers={"x-goog-api-key": self.key}, json=body)
                 response.raise_for_status()
                 result = response.json()
@@ -252,7 +260,7 @@ class GeminiResolver:
                 n_out = meta_usage.get("candidatesTokenCount", 0) + meta_usage.get("thoughtsTokenCount", 0)
                 if type(n_in) is not int or n_in < 0 or type(n_out) is not int or n_out < 0:
                     raise RuntimeError("Provider omitted usage; conservative budget reservation retained")
-                cost, usage = self.cost(n_in, n_out), {"input_tokens": n_in, "output_tokens": n_out}
+                cost, usage = self.cost(n_in, n_out, model), {"input_tokens": n_in, "output_tokens": n_out, "model": model}
                 reservation.settle(cost, call_id=cid, busy_retries=retries, **usage)
                 candidate = result["candidates"][0]
                 if candidate.get("finishReason") not in ("STOP", None):
