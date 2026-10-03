@@ -34,6 +34,11 @@ For each claim, read the cited segments and their neighbours, then answer:
 - overstated: the transcript supports only a weaker version (for example an objection was answered but not
   accepted, intent was conditional, or a value is approximate).
 - unsupported: the transcript does not state it, contradicts it, or attributes it to a different person.
+Judge the main claim: the fact, signal, concern or pitch itself. A missing optional detail, such as a
+prospect response that was not recorded, does not make a claim unsupported; mention it in the reason.
+The call-purpose claim classifies the whole conversation rather than quoting it: judge whether it fits
+(sales, enrollment_or_payment, learner_support, administrative, brief_followup, unusable such as voicemail or
+call screening, or unclear).
 Speaker roles come from automatic diarization and can be wrong; judge who said what from the content.
 For an objection whose concern is real but whose resolution is too strong, answer overstated and give
 corrected_resolution. Give a short reason. Return JSON only, exactly one verdict per claim id."""
