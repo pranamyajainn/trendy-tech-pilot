@@ -171,8 +171,16 @@ def verified_extract(call, store, extractor, verifier, force=False):
     output_path = store.path("extractions", cid + ".json")
     if output_path.exists() and not force and read_json(output_path)["fingerprint"] == fingerprint:
         return read_json(output_path)
-    parsed, attempt, usage = extraction_attempts(call, store, extractor, transcript, fingerprint)
-    extraction = parsed.model_dump()
+    # The checked-out extraction is cached, so a verification that fails (for example on a daily quota) can be
+    # retried later without paying for, or changing, the extraction itself.
+    cache = store.path("review", "unverified", cid + ".json")
+    if cache.exists() and read_json(cache)["fingerprint"] == fingerprint:
+        cached = read_json(cache)
+        extraction, attempt, usage = cached["extraction"], cached["attempt"], cached["usage"]
+    else:
+        parsed, attempt, usage = extraction_attempts(call, store, extractor, transcript, fingerprint)
+        extraction = parsed.model_dump()
+        write_json(cache, {"fingerprint": fingerprint, "extraction": extraction, "attempt": attempt, "usage": usage})
     claims = claims_of(extraction)
     start = time.monotonic()
     if len(claims) == 1 and extraction["conversation_type"] in ("unusable", "unclear"):

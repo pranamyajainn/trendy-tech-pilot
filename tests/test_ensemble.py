@@ -113,3 +113,36 @@ def test_retiring_a_freeze_archives_it_and_blocks_holdout_until_a_new_freeze(tmp
     assert read_json(archived)["reason"] == "Replaced by multi-model method"
     with pytest.raises(ValueError, match="Freeze the method"):
         verify_freeze(store, "asr", "llm")
+
+
+def test_failed_verification_reuses_the_cached_extraction_on_retry(tmp_path, monkeypatch):
+    import json
+
+    import httpx
+
+    from trendytech_pilot import ensemble
+    store = Store(tmp_path)
+    transcript = {"fingerprint": "t", "flags": [], "segments": [{"id": 0, "text": "I am a data engineer", "role": "prospect"}]}
+    monkeypatch.setattr("trendytech_pilot.artifacts.current_source", lambda store, cid: transcript)
+    body = {**extraction(facts=[{"field": "current_role", "value": "data engineer",
+                                 "evidence": ev(0, "data engineer")}]), "purpose_evidence": ev(0, "data engineer")}
+    calls = []
+
+    class Extractor:
+        model_id = "gemini-3.8-flash"
+
+        def generate(self, system, user, **kwargs):
+            calls.append("extract")
+            return json.dumps(body), {}
+
+    class QuotaVerifier:
+        model_id = "gemini-3.1-pro-preview"
+
+        def generate(self, *args, **kwargs):
+            raise httpx.HTTPStatusError("quota", request=httpx.Request("POST", "https://x"), response=httpx.Response(429))
+
+    with pytest.raises(httpx.HTTPStatusError):
+        ensemble.verified_extract({"call_id": "Ctest"}, store, Extractor(), QuotaVerifier())
+    with pytest.raises(httpx.HTTPStatusError):
+        ensemble.verified_extract({"call_id": "Ctest"}, store, Extractor(), QuotaVerifier())
+    assert calls == ["extract"]  # The second attempt reused the cached extraction.
