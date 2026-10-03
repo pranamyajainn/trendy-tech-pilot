@@ -40,7 +40,9 @@ def post_with_busy_retries(client, url, reservation, delays, **request):
     """Retry capacity rejections under one reservation rather than stacking a new one per attempt."""
     for retries, delay in enumerate((*delays, None)):
         response = client.post(url, **request)
-        if response.status_code not in BUSY_STATUSES or delay is None:
+        # A daily quota will not recover within the retry window, so it fails at once.
+        daily_quota = response.status_code == 429 and "PerDay" in response.text
+        if response.status_code not in BUSY_STATUSES or delay is None or daily_quota:
             return response, retries
         reservation.note(busy_retries=retries + 1)
         time.sleep(delay)

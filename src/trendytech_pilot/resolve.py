@@ -58,7 +58,7 @@ time (times are approximate, within a few seconds) and decide which candidate ma
 For each speaker label, say whether it is the company agent, the prospect or learner, another person (for
 example a voicemail system or a third participant), or unknown, using the sample lines.
 Return JSON only."""
-RESOLVER = {"model": "gemini-3.1-pro-preview", "version": "resolver-v2-three-way", "threshold": 0.9,
+RESOLVER = {"model": "gemini-3.1-pro-preview", "version": "resolver-v3-sarvam-roles", "threshold": 0.9,
             "thinking": "low", "instructions_sha256": digest(INSTRUCTIONS), "audio": "ogg/opus 24 kbps mono",
             "systems": {"gemini": GEMINI_ASR["version"], "sarvam": SARVAM_ASR["version"]}}
 SCHEMA = provider_schema(Resolution.model_json_schema())
@@ -206,10 +206,11 @@ class GeminiResolver:
         segments = whisper["segments"]
         rows = vote(segments, gemini["text"], sarvam["text"], RESOLVER["threshold"])
         spans = disputed_spans(segments, rows)
-        speaker_by_segment = segment_speakers(segments, gemini["turns"])
+        # Speaker labels come from Sarvam's diarization; Gemini transcribes without speaker turns.
+        speaker_by_segment = segment_speakers(segments, sarvam["turns"])
         start, cost, usage = time.monotonic(), 0.0, {}
-        if spans or gemini["speakers"]:
-            resolution, cost, usage = self._ask(cid, spans, gemini["turns"], start)
+        if spans or sarvam["speakers"]:
+            resolution, cost, usage = self._ask(cid, spans, sarvam["turns"], start)
         else:
             resolution = Resolution(speakers=[], spans=[])
         consensus, dropped = build_consensus(cid, segments, rows, spans, resolution, speaker_by_segment)

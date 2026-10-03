@@ -16,11 +16,11 @@ from trendytech_pilot.storage import Store, read_json, write_json
 
 SEGMENTS = [{"id": i, "text": t, "start": i * 2.0, "end": i * 2.0 + 2}
             for i, t in enumerate(["hello there", "two clubs", "data bricks lab", "fine thanks", "see you"])]
-GEMINI = {"fingerprint": "gemini", "speakers": ["spk:0", "spk:1"],
-          "text": "hello there two clouds databricks lab five thanks see you monday",
-          "turns": [{"speaker": "spk:0", "text": "hello there two clouds databricks lab"},
-                    {"speaker": "spk:1", "text": "five thanks see you monday"}]}
-SARVAM = {"fingerprint": "sarvam", "text": "hello there two clouds data bricks lab fine thanks see you tuesday"}
+GEMINI = {"fingerprint": "gemini", "text": "hello there two clouds databricks lab five thanks see you monday"}
+SARVAM = {"fingerprint": "sarvam", "text": "hello there two clouds data bricks lab fine thanks see you tuesday",
+          "speakers": ["sarvam:0", "sarvam:1"],
+          "turns": [{"speaker": "sarvam:0", "text": "hello there two clouds data bricks lab"},
+                    {"speaker": "sarvam:1", "text": "fine thanks see you tuesday"}]}
 
 
 def letter(call_id, span_id, system):
@@ -38,10 +38,10 @@ def test_consensus_uses_majority_text_and_copies_the_chosen_candidate():
     rows = vote(SEGMENTS, GEMINI["text"], SARVAM["text"], 0.9)
     spans = disputed_spans(SEGMENTS, rows)
     assert [s["segment_ids"] for s in spans] == [[4]]
-    resolution = Resolution(speakers=[{"label": "spk:0", "role": "agent"}, {"label": "spk:1", "role": "prospect"}],
+    resolution = Resolution(speakers=[{"label": "sarvam:0", "role": "agent"}, {"label": "sarvam:1", "role": "prospect"}],
                             spans=[{"span_id": 0, "choice": letter("Ctest", 0, "whisper"), "text": "retyped",
                                     "unclear": False}])
-    out, dropped = build_consensus("Ctest", SEGMENTS, rows, spans, resolution, {0: "spk:0", 1: "spk:0", 4: "spk:1"})
+    out, dropped = build_consensus("Ctest", SEGMENTS, rows, spans, resolution, {0: "sarvam:0", 1: "sarvam:0", 4: "sarvam:1"})
     assert [(s["id"], s["source"], s["text"]) for s in out] == [
         (0, "agreed", "hello there"), (1, "majority_gemini_sarvam", "two clouds"), (2, "agreed", "data bricks lab"),
         (3, "majority_whisper", "fine thanks"), (4, "resolved_whisper", "see you")]
@@ -66,7 +66,7 @@ def resolver(tmp_path, monkeypatch, decisions):
     monkeypatch.setattr(resolve, "opus_audio", lambda path: b"synthetic-opus")
     store = Store(tmp_path)
     write_json(store.path("audio", "Ctest.json"), {"file": "synthetic.wav", "duration_seconds": 10})
-    body = {"speakers": [{"label": "spk:0", "role": "agent"}], "spans": decisions}
+    body = {"speakers": [{"label": "sarvam:0", "role": "agent"}], "spans": decisions}
 
     def respond(request):
         return httpx.Response(200, json={"usageMetadata": {"promptTokenCount": 900, "candidatesTokenCount": 80,

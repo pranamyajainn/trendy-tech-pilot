@@ -1,3 +1,5 @@
+import json
+
 import httpx
 import pytest
 
@@ -6,12 +8,9 @@ from trendytech_pilot.remote_asr import GeminiTranscriber
 from trendytech_pilot.storage import Store, read_json, write_json
 
 RESPONSE = {"candidates": [{"finishReason": "STOP", "content": {"parts": [
-    {"text": "Hello, calling about the course.", "audioTranscription": {"speakerLabel": "spk:0", "words": [
-        {"word": "Hello,", "startOffset": "0.4s", "endOffset": "0.8s"},
-        {"word": "course.", "startOffset": "2s", "endOffset": "2.5s"}]}},
-    {"text": "Yes.", "audioTranscription": {"speakerLabel": "spk:1", "words": [
-        {"word": "Yes.", "startOffset": "3s", "endOffset": "3.2s"}]}}]}}],
-    "usageMetadata": {"promptTokenCount": 1500}}
+    {"text": "thinking", "thought": True},
+    {"text": json.dumps({"transcript": " Hello, calling about the course. Yes. "})}]}}],
+    "usageMetadata": {"promptTokenCount": 2000, "candidatesTokenCount": 60, "thoughtsTokenCount": 40}}
 
 
 def transcriber(tmp_path, monkeypatch, handler):
@@ -23,7 +22,7 @@ def transcriber(tmp_path, monkeypatch, handler):
     return GeminiTranscriber(store, httpx.Client(transport=httpx.MockTransport(handler))), store
 
 
-def test_turns_speakers_and_published_minimum_rate_are_recorded(tmp_path, monkeypatch):
+def test_verbatim_transcript_and_token_cost_are_recorded(tmp_path, monkeypatch):
     requests = []
 
     def respond(request):
@@ -31,15 +30,21 @@ def test_turns_speakers_and_published_minimum_rate_are_recorded(tmp_path, monkey
         return httpx.Response(200, json=RESPONSE)
     asr, store = transcriber(tmp_path, monkeypatch, respond)
     artifact = asr.transcribe({"call_id": "Ctest"})
-    assert artifact["speakers"] == ["spk:0", "spk:1"] and artifact["text"] == "Hello, calling about the course. Yes."
-    assert artifact["turns"][0]["start"] == 0.4 and artifact["turns"][1]["end"] == 3.2
-    # 1,500 audio tokens cost less than the published per-minute rate, which therefore applies.
+    assert artifact["text"] == "Hello, calling about the course. Yes." and "turns" not in artifact
     [entry] = read_json(store.path("api-budget.json"))["requests"].values()
-    assert entry["status"] == "usage_reported" and entry["inr"] == pytest.approx(0.005 * 125)
-    [event] = store.events()
-    assert event["stage"] == "transcribe" and event["external_cost_inr"] == pytest.approx(0.625)
+    assert entry["status"] == "usage_reported" and entry["inr"] == pytest.approx(asr.cost(2000, 100))
     asr.transcribe({"call_id": "Ctest"})
     assert len(requests) == 1  # Same audio and settings: the stored transcript is reused.
+
+
+def test_cut_off_transcript_is_rejected_after_recording_usage(tmp_path, monkeypatch):
+    body = {**RESPONSE, "candidates": [{**RESPONSE["candidates"][0], "finishReason": "MAX_TOKENS"}]}
+    asr, store = transcriber(tmp_path, monkeypatch, lambda request: httpx.Response(200, json=body))
+    with pytest.raises(ValueError, match="cut-off"):
+        asr.transcribe({"call_id": "Ctest"})
+    [entry] = read_json(store.path("api-budget.json"))["requests"].values()
+    assert entry["status"] == "usage_reported" and [e["status"] for e in store.events()] == ["failed"]
+    assert not store.path("asr", "gemini", "Ctest.json").exists()
 
 
 def test_missing_usage_keeps_the_reservation_and_records_the_failure(tmp_path, monkeypatch):
@@ -48,8 +53,6 @@ def test_missing_usage_keeps_the_reservation_and_records_the_failure(tmp_path, m
         asr.transcribe({"call_id": "Ctest"})
     [entry] = read_json(store.path("api-budget.json"))["requests"].values()
     assert entry["status"] == "uncertain_reserve_retained"
-    assert [e["status"] for e in store.events()] == ["failed"]
-    assert not store.path("asr", "gemini", "Ctest.json").exists()
 
 
 def test_remote_transcription_is_disabled_by_default(tmp_path, monkeypatch):

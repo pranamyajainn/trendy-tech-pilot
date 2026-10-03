@@ -162,3 +162,16 @@ def test_concurrent_reservations_both_count_against_the_cap(tmp_path, monkeypatc
         first.settle(2)
     state = read_json(budget.path)
     assert state["committed_inr"] == pytest.approx(3) and len(state["requests"]) == 2
+
+
+def test_daily_quota_exhaustion_is_not_retried(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr("trendytech_pilot.remote.time.sleep", lambda seconds: None)
+
+    def exhausted(request):
+        calls.append(request)
+        return httpx.Response(429, json={"error": {"details": [{"quotaId": "GenerateRequestsPerDayPerProjectPerModel"}]}})
+    extractor = enabled(tmp_path, monkeypatch, exhausted)
+    with pytest.raises(httpx.HTTPStatusError):
+        extractor.generate("system", "transcript")
+    assert len(calls) == 1
