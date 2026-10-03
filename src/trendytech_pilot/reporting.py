@@ -6,7 +6,7 @@ from collections import Counter, defaultdict
 from datetime import datetime
 from itertools import pairwise
 
-from .artifacts import current_extraction
+from .artifacts import current_extraction, current_source
 from .storage import digest, read_json, write_csv, write_json
 
 
@@ -52,7 +52,7 @@ def cost_summary(store, calls):
     external = sum(e.get("external_cost_inr", 0) for e in relevant)
     remote_events = [e for e in events if e.get("stage") == "remote_usage"]
     external += sum(e.get("external_cost_inr", 0) for e in remote_events)
-    inference = [e for e in relevant if e.get("stage") in ("transcribe", "extract", "resolve")]
+    inference = [e for e in relevant if e.get("stage") in ("transcribe", "extract", "resolve", "verify")]
     wall_hours = sum(e.get("wall_seconds", 0) for e in inference) / 3600
     rate = os.getenv("PILOT_LOCAL_COMPUTE_INR_PER_HOUR")
     local_rate = float(rate) if rate else None
@@ -194,7 +194,8 @@ def export_tables(store):
                                "objections": "; ".join(o["category"] + ": " + o["concern"] for o in ex["objections"]),
                                "asr_flags": "; ".join(result["asr_flags"]),
                                "uncertainties": "; ".join(ex["uncertainties"]), **quality_coverage(ex)})
-                transcript = read_json(store.path("transcripts", c["call_id"] + ".json"))
+                # Evidence segment ids and timestamps come from the transcript the extraction was made from.
+                transcript = current_source(store, c["call_id"])
                 segments = {s["id"]: s for s in transcript["segments"]}
                 starts[c["call_id"]] = {s["id"]: s["start"] for s in transcript["segments"]}
                 record["duration_seconds_audio"] = transcript["duration_seconds"]

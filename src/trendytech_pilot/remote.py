@@ -78,15 +78,15 @@ class GeminiExtractor:
     def cost(self, input_tokens, output_tokens):
         return (input_tokens * self.input_usd_per_million + output_tokens * self.output_usd_per_million) / 1e6 * self.fx_with_buffer
 
-    def generate(self, system, user, max_tokens=None):
+    def generate(self, system, user, max_tokens=None, schema=RESPONSE_SCHEMA, schema_name="call_extraction"):
         max_tokens = max_tokens or self.generation["max_completion_tokens"]
-        input_bound = len((system + user + json.dumps(RESPONSE_SCHEMA)).encode()) + 1024
+        input_bound = len((system + user + json.dumps(schema)).encode()) + 1024
         payload = {
             "model": self.model_id, "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
             "temperature": self.generation["temperature"], "reasoning_effort": self.generation["reasoning_effort"],
             "max_completion_tokens": max_tokens,
-            "response_format": {"type": "json_schema", "json_schema": {"name": "call_extraction", "strict": True,
-                                                                        "schema": RESPONSE_SCHEMA}},
+            "response_format": {"type": "json_schema", "json_schema": {"name": schema_name, "strict": True,
+                                                                        "schema": schema}},
         }
         with self.budget.reserve(self.cost(input_bound, max_tokens)) as reservation:
             response, retries = post_with_busy_retries(self.client, self.generation["endpoint"], reservation,

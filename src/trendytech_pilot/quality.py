@@ -2,7 +2,7 @@
 
 import csv
 
-from .artifacts import current_extraction, current_transcript
+from .artifacts import current_extraction, current_source
 from .storage import digest, read_json, write_csv, write_json
 
 
@@ -37,7 +37,7 @@ def export_qa(store):
     text_rows, field_rows = [], []
     for call in calls:
         cid = call["call_id"]
-        transcript = current_transcript(store, cid)
+        transcript = current_source(store, cid)
         if transcript:
             # Full recording coverage catches speech missing from ASR, including empty ASR output.
             # Model text is absent from the independent reference collection sheet.
@@ -85,7 +85,7 @@ def evaluate_reviews(store):
     field_rows = read_rows("holdout_field_review.csv")
     for row in text_rows:
         cid = row["call_id"]
-        artifact = current_transcript(store, cid) if cid in calls else None
+        artifact = current_source(store, cid) if cid in calls else None
         if not artifact or row.get("artifact_fingerprint") != artifact["fingerprint"] or cid in seen_text:
             ignored += 1
             continue

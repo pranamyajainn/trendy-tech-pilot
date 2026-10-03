@@ -11,6 +11,13 @@ from trendytech_pilot.reporting import priority_for
 from trendytech_pilot.storage import write_csv
 
 
+@pytest.fixture(autouse=True)
+def whisper_source(monkeypatch):
+    """These tests check review and export logic on Whisper-sourced fixtures; consensus sourcing is tested in
+    test_ensemble.py."""
+    monkeypatch.setattr("trendytech_pilot.artifacts.TRANSCRIPT_SOURCE", "whisper")
+
+
 def qa_store(tmp_path, hypothesis):
     from trendytech_pilot.audio import ASR_VERSION
     from trendytech_pilot.models import LOCAL_REVISIONS

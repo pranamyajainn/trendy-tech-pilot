@@ -3,8 +3,14 @@
 from .audio import ASR_VERSION
 from .extract import PROMPT_VERSION, SYSTEM, extraction_fingerprint, generation_config
 from .models import LOCAL_REVISIONS
+from .remote_asr import GEMINI_ASR
+from .resolve import RESOLVER
 from .schema import EVIDENCE_RULES_VERSION
 from .storage import digest, read_json
+
+# Method v2 (3 Oct 2026): extraction reads the consensus of Whisper and Gemini Transcribe, resolved by Gemini Pro.
+TRANSCRIPT_SOURCE = "consensus"
+CONSENSUS_METHOD = {"second_asr": GEMINI_ASR, "resolver": RESOLVER}
 
 
 def current_transcript(store, call_id):
@@ -28,9 +34,33 @@ def current_transcript(store, call_id):
     return transcript
 
 
+def current_consensus(store, call_id):
+    """The consensus is current only if every link is: audio, Whisper, Gemini Transcribe and resolver settings."""
+    whisper = current_transcript(store, call_id)
+    path, gemini_path = store.path("asr", "consensus", call_id + ".json"), store.path("asr", "gemini", call_id + ".json")
+    if not whisper or not path.exists() or not gemini_path.exists():
+        return None
+    consensus, gemini = read_json(path), read_json(gemini_path)
+    audio = read_json(store.path("audio", call_id + ".json"))
+    if (gemini.get("fingerprint") != digest([audio["sha256"], GEMINI_ASR])
+            or consensus.get("fingerprint") != digest([whisper["fingerprint"], gemini["fingerprint"], RESOLVER])):
+        return None
+    frozen_path = store.path("method-freeze.json")
+    if frozen_path.exists() and read_json(frozen_path).get("consensus") != CONSENSUS_METHOD:
+        return None
+    return {**consensus, "flags": whisper["flags"], "duration_seconds": whisper["duration_seconds"]}
+
+
+def current_source(store, call_id):
+    """The transcript that extraction, evidence timestamps and transcription QA use under the current method."""
+    if TRANSCRIPT_SOURCE == "consensus":
+        return current_consensus(store, call_id)
+    return current_transcript(store, call_id)
+
+
 def current_extraction(store, call_id):
     path = store.path("extractions", call_id + ".json")
-    transcript = current_transcript(store, call_id)
+    transcript = current_source(store, call_id)
     if not transcript or not path.exists():
         return None
     artifact = read_json(path)
