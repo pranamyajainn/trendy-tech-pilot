@@ -1,15 +1,14 @@
 """Optional paid Gemini fallback. Disabled unless explicitly configured locally."""
 
 import json
-import math
 import os
 import time
-import uuid
 
 import httpx
 
+from .budget import Budget, BudgetExceeded  # noqa: F401 -- BudgetExceeded is part of this module's interface
 from .schema import CallExtraction
-from .storage import digest, read_json, write_json
+from .storage import digest
 
 ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
 # The OpenAI-compatible endpoint rejected schemas containing these keywords with HTTP 400 (tested 2026-10-03).
@@ -17,10 +16,7 @@ ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/openai/chat/complet
 UNSUPPORTED_SCHEMA_KEYS = {"title", "default", "additionalProperties", "maxItems", "maxLength", "minLength", "minimum"}
 # Capacity and rate-limit rejections. They are retried under the request's existing reservation.
 BUSY_STATUSES = {429, 503}
-
-
-class BudgetExceeded(RuntimeError):
-    pass
+COST_BASIS = "Provider tokens at published rates with INR 125/USD budget factor; invoice not reconciled"
 
 
 def provider_schema(schema):
@@ -38,6 +34,16 @@ def provider_schema(schema):
                 for key, value in node.items() if key not in UNSUPPORTED_SCHEMA_KEYS | {"$defs"}}
 
     return clean(schema)
+
+
+def post_with_busy_retries(client, url, reservation, delays, **request):
+    """Retry capacity rejections under one reservation rather than stacking a new one per attempt."""
+    for retries, delay in enumerate((*delays, None)):
+        response = client.post(url, **request)
+        if response.status_code not in BUSY_STATUSES or delay is None:
+            return response, retries
+        reservation.note(busy_retries=retries + 1)
+        time.sleep(delay)
 
 
 RESPONSE_SCHEMA = provider_schema(CallExtraction.model_json_schema())
@@ -65,76 +71,42 @@ class GeminiExtractor:
             raise ValueError("Set GEMINI_API_KEY in the ignored local .env; never in chat or Git.")
         self.store = store
         self.client = client or httpx.Client(timeout=180)
-        configured_cap = float(os.getenv("PILOT_API_CAP_INR", "500"))
-        if not math.isfinite(configured_cap) or configured_cap <= 0:
-            raise ValueError("API cap must be finite and positive")
-        self.cap = min(configured_cap, 500)
+        self.budget = Budget(store)
+        self.budget_path = self.budget.path
         self.fx_with_buffer = 125.0  # Budget assumption: INR 100/USD plus 25% tax/FX buffer; not a spot quote.
-        self.budget_path = store.path("api-budget.json")
 
     def cost(self, input_tokens, output_tokens):
         return (input_tokens * self.input_usd_per_million + output_tokens * self.output_usd_per_million) / 1e6 * self.fx_with_buffer
 
     def generate(self, system, user, max_tokens=None):
-        import fcntl
-
         max_tokens = max_tokens or self.generation["max_completion_tokens"]
-        # One remote request at a time, including across CLI processes. Uncertain requests retain reserves.
-        with self.store.path("api-budget.lock").open("w") as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX)
-            input_bound = len((system + user + json.dumps(RESPONSE_SCHEMA)).encode()) + 1024
-            reserve = self.cost(input_bound, max_tokens)
-            budget = read_json(self.budget_path) if self.budget_path.exists() else {"committed_inr": 0, "requests": {}}
-            if budget["committed_inr"] + reserve > self.cap:
-                raise BudgetExceeded("The conservative API reserve would exceed the configured INR cap")
-            request_id = str(uuid.uuid4())
-            budget["committed_inr"] += reserve
-            budget["requests"][request_id] = {"status": "reserved", "inr": reserve}
-            write_json(self.budget_path, budget)
-            payload = {
-                "model": self.model_id, "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
-                "temperature": self.generation["temperature"], "reasoning_effort": self.generation["reasoning_effort"],
-                "max_completion_tokens": max_tokens,
-                "response_format": {"type": "json_schema", "json_schema": {"name": "call_extraction", "strict": True,
-                                                                            "schema": RESPONSE_SCHEMA}},
-            }
-            try:
-                retries = 0
-                for delay in (*self.busy_retry_delays, None):
-                    response = self.client.post(self.generation["endpoint"],
-                                                headers={"Authorization": "Bearer " + self.key}, json=payload)
-                    if response.status_code not in BUSY_STATUSES or delay is None:
-                        break
-                    # Reuse this reservation rather than stacking a new one for every busy response.
-                    retries += 1
-                    budget["requests"][request_id]["busy_retries"] = retries
-                    write_json(self.budget_path, budget)
-                    time.sleep(delay)
-                response.raise_for_status()
-                result = response.json()
-                usage = result.get("usage", {})
-                if "prompt_tokens" not in usage or "completion_tokens" not in usage:
-                    raise RuntimeError("Provider omitted usage; conservative budget reservation retained")
-                n_in, n_out = usage["prompt_tokens"], usage["completion_tokens"]
-                if any(type(n) is not int or n < 0 for n in (n_in, n_out)):
-                    raise ValueError("Provider usage must be nonnegative integers; reservation retained")
-                actual_estimate = self.cost(n_in, n_out)
-                budget["committed_inr"] += actual_estimate - reserve
-                budget["requests"][request_id] = {"status": "usage_reported", "inr": actual_estimate,
-                                                   "input_tokens": n_in, "output_tokens": n_out, "busy_retries": retries}
-                write_json(self.budget_path, budget)
-                self.store.event(stage="remote_usage", request_id=request_id, model=self.model_id,
-                                 external_cost_inr=actual_estimate, input_tokens=n_in, output_tokens=n_out,
-                                 busy_retries=retries,
-                                 cost_basis="Provider tokens at published rates with INR 125/USD budget factor; invoice not reconciled")
-                choice = result["choices"][0]
-                if choice.get("finish_reason") not in ("stop", None):
-                    raise ValueError("Remote output incomplete; token usage has been recorded")
-                return choice["message"]["content"], {"input_tokens": n_in, "output_tokens": n_out,
-                                                       "provider_cost_estimate_inr": actual_estimate}
-            except (httpx.HTTPError, KeyError, RuntimeError, ValueError):
-                # Unknown provider billing is never silently counted as free.
-                if budget["requests"][request_id]["status"] == "reserved":
-                    budget["requests"][request_id]["status"] = "uncertain_reserve_retained"
-                    write_json(self.budget_path, budget)
-                raise
+        input_bound = len((system + user + json.dumps(RESPONSE_SCHEMA)).encode()) + 1024
+        payload = {
+            "model": self.model_id, "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+            "temperature": self.generation["temperature"], "reasoning_effort": self.generation["reasoning_effort"],
+            "max_completion_tokens": max_tokens,
+            "response_format": {"type": "json_schema", "json_schema": {"name": "call_extraction", "strict": True,
+                                                                        "schema": RESPONSE_SCHEMA}},
+        }
+        with self.budget.reserve(self.cost(input_bound, max_tokens)) as reservation:
+            response, retries = post_with_busy_retries(self.client, self.generation["endpoint"], reservation,
+                                                       self.busy_retry_delays, json=payload,
+                                                       headers={"Authorization": "Bearer " + self.key})
+            response.raise_for_status()
+            result = response.json()
+            usage = result.get("usage", {})
+            if "prompt_tokens" not in usage or "completion_tokens" not in usage:
+                raise RuntimeError("Provider omitted usage; conservative budget reservation retained")
+            n_in, n_out = usage["prompt_tokens"], usage["completion_tokens"]
+            if any(type(n) is not int or n < 0 for n in (n_in, n_out)):
+                raise ValueError("Provider usage must be nonnegative integers; reservation retained")
+            actual_estimate = self.cost(n_in, n_out)
+            reservation.settle(actual_estimate, input_tokens=n_in, output_tokens=n_out, busy_retries=retries)
+            self.store.event(stage="remote_usage", request_id=reservation.request_id, model=self.model_id,
+                             external_cost_inr=actual_estimate, input_tokens=n_in, output_tokens=n_out,
+                             busy_retries=retries, cost_basis=COST_BASIS)
+            choice = result["choices"][0]
+            if choice.get("finish_reason") not in ("stop", None):
+                raise ValueError("Remote output incomplete; token usage has been recorded")
+            return choice["message"]["content"], {"input_tokens": n_in, "output_tokens": n_out,
+                                                   "provider_cost_estimate_inr": actual_estimate}

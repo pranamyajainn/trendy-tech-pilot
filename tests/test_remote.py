@@ -40,7 +40,7 @@ def test_uncertain_timeout_reserves_cost_and_respects_cap(tmp_path, monkeypatch)
         extractor.generate("system", "transcript")
     reserved = read_json(extractor.budget_path)["committed_inr"]
     assert reserved > 0
-    extractor.cap = reserved
+    extractor.budget.cap = reserved
     with pytest.raises(BudgetExceeded):
         extractor.generate("system", "transcript")
 
@@ -50,6 +50,12 @@ def test_invalid_cap_cannot_disable_budget_check(tmp_path, monkeypatch, cap):
     monkeypatch.setenv("PILOT_API_CAP_INR", cap)
     with pytest.raises(ValueError, match="finite and positive"):
         enabled(tmp_path, monkeypatch, lambda request: pytest.fail("Must not make a request"))
+
+
+def test_configured_cap_cannot_exceed_the_owner_ceiling(tmp_path, monkeypatch):
+    from trendytech_pilot.budget import MAX_CAP_INR
+    monkeypatch.setenv("PILOT_API_CAP_INR", str(MAX_CAP_INR * 10))
+    assert enabled(tmp_path, monkeypatch, ok_response).budget.cap == MAX_CAP_INR
 
 
 @pytest.mark.parametrize("count", [-1, 1.5, True, "200"])
