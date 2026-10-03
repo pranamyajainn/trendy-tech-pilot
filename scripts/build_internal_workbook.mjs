@@ -89,8 +89,8 @@ const out = path.join(root, 'deliverables');
 await fs.mkdir(out, {recursive: true});
 for (const sheetName of ['Pilot readout', 'Worklist', 'Journey review', 'Lead profiles', 'Calls', 'Objection summary', 'Signal summary', 'Evidence', 'Processing costs']) {
   const preview = await workbook.render({sheetName, range: sheetName === 'Pilot readout' ? 'A1:B18' : sheetName === 'Processing costs' ? 'A1:B12' : 'A1:F7', scale: 1, format: 'png'});
-  await fs.writeFile(path.join(out, 'preview-' + sheetName.replaceAll(' ', '-') + '.png'), new Uint8Array(await preview.arrayBuffer()));
+  await fs.writeFile(path.join(out, 'internal-preview-' + sheetName.replaceAll(' ', '-') + '.png'), new Uint8Array(await preview.arrayBuffer()));
 }
 const output = await SpreadsheetFile.exportXlsx(workbook);
-await output.save(path.join(out, 'TrendyTech Pilot Workbook.xlsx'));
+await output.save(path.join(out, 'TrendyTech Pilot Internal Workbook.xlsx'));
 console.log('Workbook exported to local private deliverables directory.');

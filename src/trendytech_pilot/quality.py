@@ -128,3 +128,35 @@ def evaluate_reviews(store):
             "ignored_stale_or_duplicate_rows": ignored, **metrics,
             "field_accuracy": sum(r["extraction_correct"] == "yes" for r in reviewed_fields) / len(reviewed_fields) if reviewed_fields else None,
             "quality_gate": "Pending independent review and agreed acceptance criteria"}
+
+
+def wilson_interval(successes, n, z=1.96):
+    """95% Wilson score interval; better behaved than the normal approximation near 0% or 100%."""
+    if n == 0:
+        return None
+    p = successes / n
+    centre = (p + z * z / (2 * n)) / (1 + z * z / n)
+    half = z * ((p * (1 - p) / n + z * z / (4 * n * n)) ** 0.5) / (1 + z * z / n)
+    return max(0.0, centre - half), min(1.0, centre + half)
+
+
+def validation_status(store):
+    """Signed reviewer verdicts on client claims and on the random holdout claim sample."""
+    def rows(name):
+        path = store.path("qa", name)
+        if not path.exists():
+            return []
+        with path.open(encoding="utf-8-sig") as handle:
+            return list(csv.DictReader(handle))
+
+    signed = lambda r: r.get("reviewer") and r.get("reviewed_at")
+    client = rows("validate-client-claims.csv")
+    audit = [r for r in rows("audit-claims-sample.csv") if signed(r) and r.get("correct", "").strip().lower() in ("yes", "no")]
+    correct = sum(r["correct"].strip().lower() == "yes" for r in audit)
+    client_signed = [r for r in client if signed(r) and r.get("verdict")]
+    return {"client_claims": len(client), "client_claims_reviewed": len(client_signed),
+            "client_claims_confirmed": sum(r["verdict"].strip().lower() == "confirmed" for r in client_signed),
+            "audit_reviewed": len(audit), "audit_correct": correct,
+            "audit_precision": correct / len(audit) if audit else None,
+            "audit_precision_95ci": wilson_interval(correct, len(audit)),
+            "complete": bool(client) and len(client_signed) == len(client) and len(audit) >= 100}

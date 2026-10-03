@@ -106,6 +106,9 @@ def main():
     freeze_action.add_argument("--retire", metavar="REASON")
     commands.add_parser("export")
     commands.add_parser("qa")
+    lead_actions = commands.add_parser("lead-actions")
+    lead_actions.add_argument("--force", action="store_true")
+    commands.add_parser("client")
     args = parser.parse_args()
     store = Store(args.data_dir)
     asr_model = os.getenv("PILOT_ASR_MODEL", "mlx-community/whisper-large-v3-turbo")
@@ -139,6 +142,25 @@ def main():
     elif args.command == "qa":
         from .quality import export_qa
         print(json.dumps(export_qa(store), indent=2))
+    elif args.command == "lead-actions":
+        from .client import journeys, lead_action
+        from .ensemble import GeminiProVerifier
+
+        model, failures = GeminiProVerifier(store), []
+        leads = journeys(store, selected_calls(store, "all"))
+        for i, journey in enumerate(leads.values(), 1):
+            try:
+                lead_action(store, journey, model, args.force)
+                print(f"{i}/{len(leads)} {journey['lead_alias']} lead-action OK", flush=True)
+            except Exception as exc:  # noqa: BLE001 -- isolate one failed lead; command still exits nonzero
+                failures.append(journey["lead_alias"])
+                print(f"{i}/{len(leads)} {journey['lead_alias']} FAILED {type(exc).__name__}", flush=True)
+        print(json.dumps({"attempted": len(leads), "failed": len(failures), "failed_leads": failures}), flush=True)
+        if failures:
+            raise SystemExit(1)
+    elif args.command == "client":
+        from .client import export_client, validation_pack
+        print(json.dumps({**validation_pack(store), **export_client(store)}, indent=2))
     else:
         calls = selected_calls(store, args.split, args.limit, args.calls.split(",") if args.calls else None)
         if args.command != "download" and (store.path("method-freeze.json").exists()
