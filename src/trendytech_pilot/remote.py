@@ -58,7 +58,9 @@ class GeminiExtractor:
             write_json(self.budget_path, budget)
             payload = {
                 "model": self.model_id, "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
-                "temperature": 0, "reasoning_effort": "low", "max_completion_tokens": max_tokens,
+                # Google recommends the default temperature for Gemini 3 reasoning models.
+                # https://ai.google.dev/gemini-api/docs/gemini-3#temperature
+                "temperature": 1.0, "reasoning_effort": "low", "max_completion_tokens": max_tokens,
                 "response_format": {"type": "json_schema", "json_schema": {"name": "call_extraction", "strict": True, "schema": schema}},
             }
             try:
