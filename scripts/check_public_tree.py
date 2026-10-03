@@ -16,7 +16,8 @@ for item in filter(None, paths):
     content = subprocess.check_output(["git", "show", ":" + item]).decode(errors="ignore")
     if re.search(r"https://recordings[.]mcube[.]com/\S+", content):
         bad.append(item)
-    if re.search(r"\b(?:sk-proj-|gsk_)[A-Za-z0-9_-]{20,}", content):
+    # OpenAI/Groq keys, then both Google API key formats (classic AIza..., newer AQ....).
+    if re.search(r"\b(?:sk-proj-|gsk_)[A-Za-z0-9_-]{20,}|AIza[0-9A-Za-z_-]{35}|\bAQ\.[A-Za-z0-9_.-]{40,}", content):
         bad.append(item)
 if bad:
     raise SystemExit("Files must not be published: " + ", ".join(sorted(set(bad))))

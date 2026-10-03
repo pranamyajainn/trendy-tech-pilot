@@ -26,7 +26,8 @@ live under ignored `data/`. This is a public code repository: never force-add cl
 ## Run on Apple silicon
 
 Python 3.11+, FFmpeg/ffprobe and enough disk space for the recordings and local model weights are required.
-The first execution downloads pretrained model weights. No model training and no paid API calls are used.
+The first execution downloads pretrained model weights. No model training is used. Paid API calls happen only
+through the opt-in hosted extraction route below.
 
 ```sh
 python3 -m venv .venv
@@ -53,11 +54,26 @@ Review development outputs and audio before freezing the method. Keep held-out c
 ```
 
 Every stage resumes existing artifacts. ASR caches include audio/model/immutable-weight-revision/version hashes; extraction caches
-include transcript/model/prompt hashes. Invalid generations are quarantined and attempted at most twice.
+include transcript/model/prompt/generation-setting hashes. Invalid generations are quarantined and attempted at most twice.
 Commands exit nonzero when any call fails, while preserving successful work. Audio downloads are restricted
 to the approved HTTPS recording host and validated with ffprobe. Holdout inference requires a frozen method.
 Complete cached model snapshots are loaded locally. Set `HF_HUB_OFFLINE=1` after downloading model weights
 to prevent network metadata checks. Do not run ASR and large-model extraction simultaneously on a 24 GB Mac.
+
+## Hosted text extraction (Gemini)
+
+Local extraction models did not pass development review. The owner approved a Gemini text-extraction test
+with an INR 500 total processing cap; audio transcription stays local. The route stays off unless
+`PILOT_ALLOW_REMOTE=1` and a local `GEMINI_API_KEY` are set. Trial it on development calls first:
+
+```sh
+PILOT_ALLOW_REMOTE=1 .venv/bin/python scripts/calibrate_remote.py CALL_ID [CALL_ID ...]
+```
+
+Trials write only to ignored `data/experiments/`; they never become production extractions. The request schema
+omits keywords Gemini's OpenAI-compatible endpoint rejects, while the full schema is still validated locally.
+Busy (429/503) responses are retried under the same budget reservation. Generation settings are part of the
+extraction fingerprint and the method freeze, so changing them makes earlier outputs stale.
 
 ## Outputs and interpretation
 

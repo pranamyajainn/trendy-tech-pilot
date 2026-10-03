@@ -3,9 +3,10 @@ import json
 import pytest
 
 from trendytech_pilot.cli import freeze_method, selected_calls, verify_freeze
-from trendytech_pilot.extract import parse_json_response
+from trendytech_pilot.extract import LOCAL_GENERATION, extraction_fingerprint, parse_json_response
 from trendytech_pilot.ingest import duration_seconds, outcome_flag, select_sample
 from trendytech_pilot.quality import word_error_rate
+from trendytech_pilot.remote import GeminiExtractor
 from trendytech_pilot.reporting import cost_summary, priority_for
 from trendytech_pilot.schema import CallExtraction, validate_evidence
 from trendytech_pilot.storage import Store, safe_cell, write_json
@@ -117,6 +118,24 @@ def test_holdout_requires_frozen_unchanged_method(tmp_path):
     verify_freeze(store, "asr", "llm")
     with pytest.raises(ValueError, match="already frozen"):
         verify_freeze(store, "new-asr", "llm")
+
+
+@pytest.mark.parametrize("model, settings", [(GeminiExtractor.model_id, GeminiExtractor.generation),
+                                             ("mlx-community/Qwen3.5-27B-4bit", LOCAL_GENERATION)])
+def test_generation_settings_are_part_of_extraction_identity(monkeypatch, model, settings):
+    before = extraction_fingerprint("transcript", model, "revision")
+    monkeypatch.setitem(settings, "temperature", 0.5)
+    assert extraction_fingerprint("transcript", model, "revision") != before
+
+
+def test_freeze_rejects_changed_generation_settings(tmp_path, monkeypatch):
+    store = Store(tmp_path)
+    write_json(store.path("selection.json"), {"sha256": "synthetic", "calls": []})
+    freeze_method(store, "asr", GeminiExtractor.model_id)
+    verify_freeze(store, "asr", GeminiExtractor.model_id)
+    monkeypatch.setitem(GeminiExtractor.generation, "temperature", 0.0)
+    with pytest.raises(ValueError, match="already frozen"):
+        verify_freeze(store, "asr", GeminiExtractor.model_id)
 
 
 def test_unknown_reference_is_not_zero_wer():

@@ -3,6 +3,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from trendytech_pilot.extract import extraction_fingerprint
 from trendytech_pilot.quality import merge_review_template
 from trendytech_pilot.reporting import priority_for
@@ -96,6 +98,16 @@ def test_public_scan_reads_staged_blob_not_cleaned_working_file(tmp_path):
     scanner = Path(__file__).resolve().parents[1] / "scripts" / "check_public_tree.py"
     result = subprocess.run([sys.executable, str(scanner)], cwd=tmp_path, capture_output=True, text=True, check=False)
     assert result.returncode != 0 and "accidental.txt" in result.stderr
+
+
+@pytest.mark.parametrize("key", ["AIza" + "A" * 35, "AQ." + "Ab3_" * 12 + "x9"])
+def test_public_scan_detects_google_api_key(tmp_path, key):
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    (tmp_path / "notes.md").write_text("GEMINI_API_KEY=" + key)
+    subprocess.run(["git", "add", "notes.md"], cwd=tmp_path, check=True)
+    scanner = Path(__file__).resolve().parents[1] / "scripts" / "check_public_tree.py"
+    result = subprocess.run([sys.executable, str(scanner)], cwd=tmp_path, capture_output=True, text=True, check=False)
+    assert result.returncode != 0 and "notes.md" in result.stderr
 
 
 def test_export_keeps_distinct_concerns_and_labels_response_claim(tmp_path):

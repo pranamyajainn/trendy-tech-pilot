@@ -1,7 +1,10 @@
 # Pilot implementation scope
 
 Authority: client proposal SAI-Q-2026-013, 28 September 2026, pages 3–4.
-The customer authorised starting the pilot on 1 October 2026 and chose local models.
+The customer authorised starting the pilot on 1 October 2026 and initially chose local models.
+On 3 October 2026 the customer confirmed that local, open-source or paid hosted models may be used.
+Local extraction failed development review, so text extraction moved to Gemini on a paid account within
+the INR 500 project cap. Audio transcription stays local.
 The signed proposal file, recordings and client workbook remain outside Git history.
 
 ## Commitments
