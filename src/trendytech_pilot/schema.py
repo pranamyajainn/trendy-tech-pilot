@@ -68,7 +68,7 @@ class CallExtraction(StrictModel):
 
 
 # Evidence acceptance rules are part of the extraction identity and method freeze.
-EVIDENCE_RULES_VERSION = "evidence-v2"
+EVIDENCE_RULES_VERSION = "evidence-v3"
 FILLERS = {"uh", "uhh", "um", "umm", "hmm", "ah", "er", "erm"}
 
 
@@ -109,6 +109,11 @@ def validate_evidence(extraction, transcript):
             errors.append(location)
 
     data = extraction.model_dump() if isinstance(extraction, CallExtraction) else extraction
+    if data.get("conversation_type") in ("learner_support", "administrative") and (
+            any(s["kind"] != "do_not_contact" for s in data.get("signals", []))
+            or data.get("objections") or data.get("pitches")):
+        # Service calls must not become buying signals; contact suppression always survives.
+        errors.append("service_call_has_sales_content")
     check(data.get("purpose_evidence"), "purpose_evidence")
     if data.get("conversation_type", "unclear") not in ("unclear", "unusable") and not data.get("purpose_evidence"):
         errors.append("purpose_missing_evidence")

@@ -30,7 +30,7 @@ def test_unknown_or_noninteger_reference_rejected(bad):
 def test_support_cannot_pass_with_sales_signal():
     data, transcript = fixture()
     data["signals"] = [{"kind": "payment_intent", "description": "Wants lessons", "evidence": 0}]
-    with pytest.raises(ValueError, match="Support/administration"):
+    with pytest.raises(ValueError, match="service_call_has_sales_content"):
         expand_references(json.dumps(data), transcript)
 
 

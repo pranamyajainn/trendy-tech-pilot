@@ -73,10 +73,8 @@ def expand_references(raw, transcript):
                 if key in item:
                     item[key] = evidence(item[key])
     parsed = CallExtraction.model_validate(data)
+    # validate_evidence also rejects support/administration calls carrying sales content.
     errors = validate_evidence(parsed, transcript)
     if errors:
         raise ValueError("Invalid evidence: " + ", ".join(errors))
-    if (parsed.conversation_type in {"learner_support", "administrative"}
-            and (any(s.kind != "do_not_contact" for s in parsed.signals) or parsed.objections or parsed.pitches)):
-        raise ValueError("Support/administration classified with sales signals, objections or pitches")
     return parsed

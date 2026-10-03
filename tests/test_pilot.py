@@ -103,6 +103,16 @@ def test_evidence_retry_message_shows_the_cited_segment_text():
     assert "facts[0].evidence cites segment 3" in message and "i think 38 may should be suitable" in message
 
 
+def test_service_call_cannot_carry_sales_content_but_keeps_contact_suppression():
+    transcript = {"segments": [{"id": 0, "text": "Please unlock my lessons."}, {"id": 1, "text": "Stop calling me."}]}
+    purpose = {"segment_id": 0, "quote": "unlock my lessons"}
+    for kind, expected in [("payment_intent", ["service_call_has_sales_content"]), ("do_not_contact", [])]:
+        ex = CallExtraction(conversation_type="administrative", purpose_evidence=purpose, summary="", next_action="",
+                            signals=[{"kind": kind, "description": kind,
+                                      "evidence": {"segment_id": 1, "quote": "Stop calling me."}}])
+        assert validate_evidence(ex, transcript) == expected
+
+
 def test_invented_segment_is_rejected():
     ex = CallExtraction(summary="", next_action="", facts=[{"field": "goal", "value": "Promotion",
         "evidence": {"segment_id": 99, "quote": "promotion"}}])
