@@ -82,6 +82,68 @@ def quality_coverage(extraction):
     }
 
 
+SALES_FACING = {"sales", "enrollment_or_payment"}
+RESOLUTIONS = ["resolved", "partly_addressed", "unresolved", "unclear"]
+PRESENT =("Evidence present", "Response documented", "Next-step signal present")
+
+
+def findings_summary(calls, analyses, starts, worklist):
+    """Counts with traceable examples. They describe this purposive pilot sample, not archive-wide rates."""
+    alias = {c["call_id"]: c["lead_alias"] for c in calls}
+    ordered = [c["call_id"] for c in sorted(calls, key=lambda c: (c["lead_alias"], c["call_number_in_export"]))
+               if c["call_id"] in analyses]
+
+    def example(cid, claim, evidence):
+        return {"lead_alias": alias[cid], "call_id": cid, "claim": claim, "quote": evidence["quote"],
+                "start_seconds": starts[cid].get(evidence["segment_id"])}
+
+    types, fields, roles, interests, coverage = Counter(), Counter(), Counter(), Counter(), Counter()
+    objections = defaultdict(lambda: {"instances": 0, "calls": set(), "examples": [], **dict.fromkeys(RESOLUTIONS, 0)})
+    signals = defaultdict(lambda: {"calls": set(), "examples": []})
+    sales_calls = calls_with_objections = 0
+    for cid in ordered:
+        ex = analyses[cid]["extraction"]
+        types[ex["conversation_type"]] += 1
+        if ex["conversation_type"] in SALES_FACING:
+            sales_calls += 1
+            calls_with_objections += bool(ex["objections"])
+            fields.update({f["field"] for f in ex["facts"]})
+            roles.update({f["value"].strip().lower() for f in ex["facts"] if f["field"] == "current_role"})
+            interests.update({f["value"].strip().lower() for f in ex["facts"] if f["field"] == "technology_interest"})
+            coverage.update(k for k, v in quality_coverage(ex).items() if v.startswith(PRESENT))
+        for o in ex["objections"]:
+            entry = objections[o["category"]]
+            entry["instances"] += 1
+            entry[o["resolution"]] += 1
+            entry["calls"].add(cid)
+            if len(entry["examples"]) < 3:
+                entry["examples"].append(example(cid, o["concern"], o["evidence"]))
+        for s in ex["signals"]:
+            entry = signals[s["kind"]]
+            if cid not in entry["calls"] and len(entry["examples"]) < 3:
+                entry["examples"].append(example(cid, s["description"], s["evidence"]))
+            entry["calls"].add(cid)
+    complete = [w for w in worklist if w["calls_analysed"] == w["calls_in_export"]]
+    return {
+        "note": "Counts describe this purposive pilot sample, not archive-wide rates. Extraction accuracy is not yet "
+                "independently measured; every example is traceable to its call and timestamp.",
+        "analysed_calls": len(ordered), "sales_facing_calls": sales_calls, "call_types": dict(types.most_common()),
+        "objections": sorted(({"category": k, "instances": v["instances"], "calls": len(v["calls"]),
+                               **{r: v[r] for r in RESOLUTIONS}, "examples": v["examples"]}
+                              for k, v in objections.items()), key=lambda x: (-x["calls"], x["category"])),
+        "signals": sorted(({"kind": k, "calls": len(v["calls"]), "examples": v["examples"]} for k, v in signals.items()),
+                          key=lambda x: (-x["calls"], x["kind"])),
+        "profile_fields_stated_in_sales_calls": dict(fields.most_common()),
+        "common_current_roles": dict(roles.most_common(8)), "common_technology_interests": dict(interests.most_common(8)),
+        "quality_coverage": [{"dimension": d, "calls_with_evidence": coverage[d],
+                              "applicable_calls": calls_with_objections if d == "objection_handling" else sales_calls}
+                             for d in ["qualification", "discovery", "pitch", "objection_handling", "closing"]],
+        "complete_journeys": len(complete),
+        "worklist_priorities": dict(Counter(w["priority"] for w in worklist).most_common()),
+        "complete_journeys_with_open_objections": sum(bool(w["open_objections"]) for w in complete),
+    }
+
+
 def export_tables(store):
     selection = read_json(store.path("selection.json"))
     calls = selection["calls"]
@@ -94,6 +156,7 @@ def export_tables(store):
             analyses[c["call_id"]] = artifact
     worklist, call_rows, evidence_rows, profile_rows = [], [], [], []
     objection_counts = Counter()
+    starts = {}
     for lead, group in groups.items():
         group.sort(key=lambda c: (c["created_on"], c["call_id"]))
         lead_analyses = {c["call_id"]: analyses[c["call_id"]] for c in group if c["call_id"] in analyses}
@@ -124,6 +187,7 @@ def export_tables(store):
                                "uncertainties": "; ".join(ex["uncertainties"]), **quality_coverage(ex)})
                 transcript = read_json(store.path("transcripts", c["call_id"] + ".json"))
                 segments = {s["id"]: s for s in transcript["segments"]}
+                starts[c["call_id"]] = {s["id"]: s["start"] for s in transcript["segments"]}
                 record["duration_seconds_audio"] = transcript["duration_seconds"]
                 record["speaker_roles"] = "Inferred from conversation; not diarized or verified"
                 ev = ex.get("purpose_evidence")
@@ -205,10 +269,15 @@ def export_tables(store):
                 "objection_mentions_by_call": dict(objection_counts), "selection_sha256": selection["sha256"],
                 "accuracy_status": "Not measured against independent references yet",
                 "scope": "Extraction pilot; no validated conversion predictions", "costs": cost_summary(store, calls)}
-    for name, rows in [("worklist", worklist), ("calls", call_rows), ("evidence", evidence_rows), ("profiles", profile_rows)]:
+    findings = findings_summary(calls, analyses, starts, worklist)
+    summaries = [("objection_summary", [{k: v for k, v in o.items() if k != "examples"} for o in findings["objections"]]),
+                 ("signal_summary", [{k: v for k, v in s.items() if k != "examples"} for s in findings["signals"]])]
+    for name, rows in [("worklist", worklist), ("calls", call_rows), ("evidence", evidence_rows),
+                       ("profiles", profile_rows), *summaries]:
         fields = list(dict.fromkeys(k for row in rows for k in row))
         write_csv(store.path("exports", name + ".csv"), rows, fields)
         write_json(store.path("exports", name + ".json"), rows)
+    write_json(store.path("exports", "findings.json"), findings)
     write_json(store.path("exports", "overview.json"), overview)
     write_csv(store.path("exports", "processing_costs.csv"), [overview["costs"]])
     write_json(store.path("exports", "report-fingerprint.json"), {"selection": selection["sha256"], "extractions": digest(analyses)})

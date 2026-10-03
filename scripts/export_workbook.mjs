@@ -6,8 +6,8 @@ import { Workbook, SpreadsheetFile } from '@oai/artifact-tool';
 
 const root = path.resolve(process.argv[2] || 'data');
 const read = async name => JSON.parse(await fs.readFile(path.join(root, 'exports', name + '.json'), 'utf8'));
-const [overview, worklist, calls, evidence, profiles] = await Promise.all(
-  ['overview', 'worklist', 'calls', 'evidence', 'profiles'].map(read)
+const [overview, worklist, calls, evidence, profiles, objectionSummary, signalSummary] = await Promise.all(
+  ['overview', 'worklist', 'calls', 'evidence', 'profiles', 'objection_summary', 'signal_summary'].map(read)
 );
 const workbook = Workbook.create();
 const safe = value => {
@@ -74,7 +74,10 @@ table('Lead profiles', profiles, ['lead_alias', 'current_role', 'experience', 'c
   {goal: 55, timeline: 38, technology_interest: 35});
 table('Calls', calls, ['lead_alias', 'call_id', 'source_excel_row', 'call_number_in_export', 'created_on', 'salesperson', 'duration_seconds_audio', 'conversation_type', 'processing_status', 'summary', 'objections', 'next_action_suggestion', 'qualification', 'discovery', 'pitch', 'objection_handling', 'script_adherence', 'closing', 'asr_flags', 'uncertainties', 'split'],
   {summary: 85, objections: 65, next_action_suggestion: 70, processing_status: 38, uncertainties: 60, script_adherence: 40});
-table('Evidence', evidence, ['lead_alias', 'call_id', 'collection', 'field', 'evidence_type', 'claim', 'quote', 'start_seconds', 'end_seconds', 'segment_id', 'review_status'],
+table('Objection summary', objectionSummary, ['category', 'calls', 'instances', 'resolved', 'partly_addressed', 'unresolved', 'unclear'],
+  {category: 24});
+table('Signal summary', signalSummary, ['kind', 'calls'], {kind: 30});
+table('Evidence', evidence,['lead_alias', 'call_id', 'collection', 'field', 'evidence_type', 'claim', 'quote', 'start_seconds', 'end_seconds', 'segment_id', 'review_status'],
   {claim: 65, quote: 95, review_status: 38});
 table('Processing costs', Object.entries(overview.costs).map(([item, value]) => ({item: titleCase(item), value: value ?? 'Unmeasured'})), ['item', 'value'], {item: 55, value: 105});
 
@@ -83,7 +86,7 @@ const inspection = await workbook.inspect({kind: 'region', sheetId: 'Pilot reado
 console.log(inspection.ndjson);
 const out = path.join(root, 'deliverables');
 await fs.mkdir(out, {recursive: true});
-for (const sheetName of ['Pilot readout', 'Worklist', 'Journey review', 'Lead profiles', 'Calls', 'Evidence', 'Processing costs']) {
+for (const sheetName of ['Pilot readout', 'Worklist', 'Journey review', 'Lead profiles', 'Calls', 'Objection summary', 'Signal summary', 'Evidence', 'Processing costs']) {
   const preview = await workbook.render({sheetName, range: sheetName === 'Pilot readout' || sheetName === 'Processing costs' ? 'A1:B12' : 'A1:F7', scale: 1, format: 'png'});
   await fs.writeFile(path.join(out, 'preview-' + sheetName.replaceAll(' ', '-') + '.png'), new Uint8Array(await preview.arrayBuffer()));
 }

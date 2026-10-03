@@ -151,3 +151,6 @@ def test_export_keeps_distinct_concerns_and_labels_response_claim(tmp_path):
     assert "I cannot afford this" in worklist[0]["open_objections"]
     assert "Is there installment interest" not in worklist[0]["open_objections"]
     assert all(e["claim"] == "Payment plans available" for e in evidence if e["evidence_type"] == "response_evidence")
+    [price] = read_json(store.path("exports", "findings.json"))["objections"]
+    assert (price["instances"], price["calls"], price["resolved"], price["unresolved"]) == (2, 2, 1, 1)
+    assert [(e["call_id"], e["start_seconds"]) for e in price["examples"]] == [("Csynthetic0", 0), ("Csynthetic1", 0)]
