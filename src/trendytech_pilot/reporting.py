@@ -52,7 +52,7 @@ def cost_summary(store, calls):
     external = sum(e.get("external_cost_inr", 0) for e in relevant)
     remote_events = [e for e in events if e.get("stage") == "remote_usage"]
     external += sum(e.get("external_cost_inr", 0) for e in remote_events)
-    inference = [e for e in relevant if e.get("stage") in ("transcribe", "extract")]
+    inference = [e for e in relevant if e.get("stage") in ("transcribe", "extract", "resolve")]
     wall_hours = sum(e.get("wall_seconds", 0) for e in inference) / 3600
     rate = os.getenv("PILOT_LOCAL_COMPUTE_INR_PER_HOUR")
     local_rate = float(rate) if rate else None
