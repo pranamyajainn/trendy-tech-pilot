@@ -287,8 +287,15 @@ def export_tables(store):
                 "accuracy_status": "Not measured against independent references yet",
                 "scope": "Extraction pilot; no validated conversion predictions", "costs": cost_summary(store, calls)}
     findings = findings_summary(calls, analyses, starts, worklist)
+    alias = {c["call_id"]: c["lead_alias"] for c in calls}
+    # Claims the verifier rejected, questioned or excluded: kept for human review, never silently dropped.
+    review_queue = [{"lead_alias": alias[cid], "call_id": cid, "collection": item["collection"],
+                     "tier": item.get("tier"), "claim": item.get("claim"), "verdict": item.get("verdict"),
+                     "corrected_to": item.get("corrected_to"), "reason": item.get("reason")}
+                    for cid, artifact in analyses.items() for item in artifact.get("review", [])]
     summaries = [("objection_summary", [{k: v for k, v in o.items() if k != "examples"} for o in findings["objections"]]),
-                 ("signal_summary", [{k: v for k, v in s.items() if k != "examples"} for s in findings["signals"]])]
+                 ("signal_summary", [{k: v for k, v in s.items() if k != "examples"} for s in findings["signals"]]),
+                 ("review_queue", review_queue)]
     for name, rows in [("worklist", worklist), ("calls", call_rows), ("evidence", evidence_rows),
                        ("profiles", profile_rows), *summaries]:
         fields = list(dict.fromkeys(k for row in rows for k in row))
