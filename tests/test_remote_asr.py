@@ -56,3 +56,13 @@ def test_remote_transcription_is_disabled_by_default(tmp_path, monkeypatch):
     monkeypatch.delenv("PILOT_ALLOW_REMOTE", raising=False)
     with pytest.raises(ValueError, match="disabled"):
         GeminiTranscriber(Store(tmp_path))
+
+
+def test_sarvam_output_becomes_speaker_turns_and_keyterms_are_not_sent():
+    from trendytech_pilot.remote_sarvam import SARVAM_ASR, parse_output
+    turns, text = parse_output({"transcript": "Hello. Yes.", "diarized_transcript": {"entries": [
+        {"transcript": "Hello.", "start_time_seconds": 0.9, "end_time_seconds": 1.5, "speaker_id": "0"},
+        {"transcript": " ", "start_time_seconds": 2, "end_time_seconds": 2.1, "speaker_id": "1"},
+        {"transcript": "Yes.", "start_time_seconds": 3, "end_time_seconds": 3.4, "speaker_id": "1"}]}})
+    assert text == "Hello. Yes." and [(t["speaker"], t["text"]) for t in turns] == [("sarvam:0", "Hello."), ("sarvam:1", "Yes.")]
+    assert "keyterms" not in SARVAM_ASR["job_parameters"]

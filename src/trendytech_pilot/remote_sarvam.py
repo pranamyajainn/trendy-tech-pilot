@@ -10,16 +10,14 @@ from .remote_asr import opus_audio
 from .storage import digest, read_json, write_json
 
 BASE = "https://api.sarvam.ai/speech-to-text/job/v1"
-# Product and technology names that general models mishear. A probe showed keyterms fixing "Gen AI" and
-# "TrendyTech"; a lone keyterm insertion is outvoted by the other two systems in the consensus.
-KEYTERMS = ["TrendyTech", "Sumit Mittal", "Databricks", "PySpark", "Spark", "Azure", "Azure Data Factory", "AWS",
-            "GCP", "Snowflake", "Kafka", "Big Data", "Data Engineering", "Gen AI", "Python", "SQL", "LinkedIn",
-            "WhatsApp", "LMS", "EMI"]
+# No keyterms: with a list of product names, Sarvam inserted them into unclear or silent audio ("pyspark sumit mittal",
+# "thank you spark") across development calls on 3 Oct 2026. Without keyterms it occasionally mishears a term
+# ("Gen AI"), which the other two systems outvote; invented words would undermine its value as an independent check.
 # Identity of the third transcript: changing any value makes stored outputs stale.
-SARVAM_ASR = {"version": "sarvam-batch-v1", "audio": "ogg/opus 24 kbps mono",
+SARVAM_ASR = {"version": "sarvam-batch-v2", "audio": "ogg/opus 24 kbps mono",
               "job_parameters": {"model": "saaras:v4", "mode": "verbatim", "language_code": "en-IN",
-                                 "with_diarization": True, "with_timestamps": True, "keyterms": KEYTERMS}}
-# Published rates seen 3 Oct 2026 conflict (INR 30/h plus 20% for diarization, or INR 45/h); the higher is used.
+                                 "with_diarization": True, "with_timestamps": True}}
+# Published rate (docs.sarvam.ai pricing, 3 Oct 2026): INR 45 per hour with diarization, billed per second.
 INR_PER_MINUTE = 45 / 60
 
 
