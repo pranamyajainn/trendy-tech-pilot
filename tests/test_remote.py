@@ -40,3 +40,22 @@ def test_uncertain_timeout_reserves_cost_and_respects_cap(tmp_path, monkeypatch)
     extractor.cap = reserved
     with pytest.raises(BudgetExceeded):
         extractor.generate("system", "transcript")
+
+
+@pytest.mark.parametrize("cap", ["nan", "inf", "-1", "0"])
+def test_invalid_cap_cannot_disable_budget_check(tmp_path, monkeypatch, cap):
+    monkeypatch.setenv("PILOT_API_CAP_INR", cap)
+    with pytest.raises(ValueError, match="finite and positive"):
+        enabled(tmp_path, monkeypatch, lambda request: pytest.fail("Must not make a request"))
+
+
+@pytest.mark.parametrize("count", [-1, 1.5, True, "200"])
+def test_invalid_provider_usage_retains_reserve(tmp_path, monkeypatch, count):
+    def respond(request):
+        return httpx.Response(200, json={"usage": {"prompt_tokens": count, "completion_tokens": 100}})
+    extractor = enabled(tmp_path, monkeypatch, respond)
+    with pytest.raises(ValueError, match="nonnegative integers"):
+        extractor.generate("system", "transcript")
+    budget = read_json(extractor.budget_path)
+    assert budget["committed_inr"] > 0
+    assert next(iter(budget["requests"].values()))["status"] == "uncertain_reserve_retained"

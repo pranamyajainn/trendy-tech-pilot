@@ -10,6 +10,11 @@ The larger Qwen3.5 27B configuration is experimental and is not approved for bul
 Its three-call development trial also found evidence and meaning errors; see [calibration notes](docs/qa-protocol.md).
 Do not interpret a successful command, this repository, or exact-quote matching as completed pilot validation.
 
+As of 3 October 2026, all 300 recordings are downloaded and the 238 development recordings are transcribed.
+The 62 held-out calls remain reserved until the extraction method is frozen. Additional segment-reference,
+recommended-sampling, reasoning and staged local experiments have not passed development meaning review.
+See [the local evaluation record](docs/local-evaluation.md). None is promoted to the production CLI.
+
 ## Data flow
 
 Client Excel → audit → frozen sample and lead-level QA split → recording downloads → local Whisper

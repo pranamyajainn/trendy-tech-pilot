@@ -3,7 +3,7 @@
 import re
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class StrictModel(BaseModel):
@@ -12,7 +12,14 @@ class StrictModel(BaseModel):
 
 class Evidence(StrictModel):
     segment_id: int = Field(ge=0)
-    quote: str = Field(min_length=3, max_length=1000)
+    quote: str = Field(min_length=1, max_length=10000)
+
+    @field_validator("quote")
+    @classmethod
+    def nonblank_quote(cls, value):
+        if not value.strip():
+            raise ValueError("Evidence quote cannot be blank")
+        return value
 
 
 class Fact(StrictModel):

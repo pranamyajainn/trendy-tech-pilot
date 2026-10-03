@@ -1,5 +1,6 @@
 """Evidence tables and conservative, retrospective lead worklists."""
 
+import math
 import os
 from collections import Counter, defaultdict
 from datetime import datetime
@@ -46,8 +47,8 @@ def cost_summary(store, calls):
     wall_hours = sum(e.get("wall_seconds", 0) for e in inference) / 3600
     rate = os.getenv("PILOT_LOCAL_COMPUTE_INR_PER_HOUR")
     local_rate = float(rate) if rate else None
-    if local_rate is not None and local_rate < 0:
-        raise ValueError("Local compute rate must be nonnegative")
+    if local_rate is not None and (not math.isfinite(local_rate) or local_rate < 0):
+        raise ValueError("Local compute rate must be finite and nonnegative")
     total = external + wall_hours * local_rate if local_rate is not None else None
     minutes = audio_seconds / 60
     return {"unique_transcribed_audio_minutes": round(minutes, 3),

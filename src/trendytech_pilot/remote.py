@@ -1,6 +1,7 @@
 """Optional paid Gemini fallback. Disabled unless explicitly configured locally."""
 
 import json
+import math
 import os
 import uuid
 
@@ -29,9 +30,10 @@ class GeminiExtractor:
             raise ValueError("Set GEMINI_API_KEY in the ignored local .env; never in chat or Git.")
         self.store = store
         self.client = client or httpx.Client(timeout=180)
-        self.cap = min(float(os.getenv("PILOT_API_CAP_INR", "500")), 500)
-        if self.cap <= 0:
-            raise ValueError("API cap must be positive")
+        configured_cap = float(os.getenv("PILOT_API_CAP_INR", "500"))
+        if not math.isfinite(configured_cap) or configured_cap <= 0:
+            raise ValueError("API cap must be finite and positive")
+        self.cap = min(configured_cap, 500)
         self.fx_with_buffer = 125.0  # Budget assumption: INR 100/USD plus 25% tax/FX buffer; not a spot quote.
         self.budget_path = store.path("api-budget.json")
 
@@ -68,6 +70,8 @@ class GeminiExtractor:
                 if "prompt_tokens" not in usage or "completion_tokens" not in usage:
                     raise RuntimeError("Provider omitted usage; conservative budget reservation retained")
                 n_in, n_out = usage["prompt_tokens"], usage["completion_tokens"]
+                if any(type(n) is not int or n < 0 for n in (n_in, n_out)):
+                    raise ValueError("Provider usage must be nonnegative integers; reservation retained")
                 actual_estimate = self.cost(n_in, n_out)
                 budget["committed_inr"] += actual_estimate - reserve
                 budget["requests"][request_id] = {"status": "usage_reported", "inr": actual_estimate,

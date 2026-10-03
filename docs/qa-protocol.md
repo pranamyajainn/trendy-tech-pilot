@@ -55,3 +55,7 @@ The 27B run recorded about 16.56 GB peak MLX memory and roughly 2.0–2.8 genera
 The first call took 264.8 seconds including prompt processing; one failed call consumed two attempts.
 It fits this machine, but this configuration is not approved for bulk extraction. No paid API requests
 were made during these experiments. Raw outputs and rejection notes are retained only in private data.
+
+Further segment-reference, recommended-sampling and staged trials are documented in
+[the local evaluation record](local-evaluation.md). No extraction configuration has been approved for
+the held-out evaluation yet. All 238 development transcripts are now available.
