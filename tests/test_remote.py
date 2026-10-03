@@ -137,7 +137,7 @@ def test_persistently_busy_provider_keeps_one_uncertain_reservation(tmp_path, mo
     assert entry["busy_retries"] == len(extractor.busy_retry_delays)
 
 
-def test_invalid_request_is_not_retried(tmp_path, monkeypatch):
+def test_invalid_request_is_not_retried_and_not_billed(tmp_path, monkeypatch):
     calls = []
 
     def reject(request):
@@ -147,6 +147,9 @@ def test_invalid_request_is_not_retried(tmp_path, monkeypatch):
     with pytest.raises(httpx.HTTPStatusError):
         extractor.generate("system", "transcript")
     assert len(calls) == 1
+    budget = read_json(extractor.budget_path)
+    [entry] = budget["requests"].values()
+    assert entry["status"] == "rejected_not_billed" and budget["committed_inr"] == 0
 
 
 def test_concurrent_reservations_both_count_against_the_cap(tmp_path, monkeypatch):

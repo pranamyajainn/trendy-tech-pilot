@@ -10,9 +10,10 @@ import httpx
 from .storage import read_json, write_json
 
 # Owner decisions, 3 Oct 2026: the project ceiling rose from INR 500 to INR 2,000 for multi-model verification,
-# then to INR 3,500 for the three-system consensus ("we don't have to care about the budget"). Sarvam usage is
-# counted at list price although paid from free credits. PILOT_API_CAP_INR may only lower the ceiling.
-MAX_CAP_INR = 3500
+# then to INR 3,500 for the three-system consensus ("we don't have to care about the budget"), then to INR 4,000
+# because ~INR 500 stays held for quota-rejected requests made before rejections were settled as unbilled.
+# Sarvam usage is counted at list price. PILOT_API_CAP_INR may only lower the ceiling.
+MAX_CAP_INR = 4000
 # A request whose billing is unknown after one of these errors keeps its reservation.
 UNCERTAIN_ERRORS = (httpx.HTTPError, KeyError, RuntimeError, ValueError)
 
@@ -69,9 +70,16 @@ class Budget:
             state["requests"][request_id] = {"status": "reserved", "inr": reserve_inr, **fields}
         try:
             yield Reservation(self, request_id, reserve_inr)
-        except UNCERTAIN_ERRORS:
-            # Unknown provider billing is never silently counted as free.
+        except UNCERTAIN_ERRORS as exc:
             with self.locked() as state:
-                if state["requests"][request_id]["status"] == "reserved":
-                    state["requests"][request_id]["status"] = "uncertain_reserve_retained"
+                entry = state["requests"][request_id]
+                if entry["status"] != "reserved":
+                    pass
+                elif isinstance(exc, httpx.HTTPStatusError) and 400 <= exc.response.status_code < 500:
+                    # A definite rejection (quota, bad request, no credits) is not processed, so it is not billed.
+                    state["committed_inr"] -= reserve_inr
+                    entry.update(status="rejected_not_billed", inr=0.0, http_status=exc.response.status_code)
+                else:
+                    # Server errors, timeouts and malformed answers: billing is unknown, so the reserve is kept.
+                    entry["status"] = "uncertain_reserve_retained"
             raise
