@@ -4,41 +4,60 @@ import httpx
 import pytest
 
 from trendytech_pilot import resolve
-from trendytech_pilot.consensus import align_to_segments, disputed_spans
-from trendytech_pilot.resolve import GeminiResolver, Resolution, a_is_whisper, build_consensus
+from trendytech_pilot.resolve import (
+    GeminiResolver,
+    Resolution,
+    build_consensus,
+    candidate_order,
+    disputed_spans,
+    vote,
+)
 from trendytech_pilot.storage import Store, read_json, write_json
 
 SEGMENTS = [{"id": i, "text": t, "start": i * 2.0, "end": i * 2.0 + 2}
-            for i, t in enumerate(["hello there", "two clubs", "only on azure", "fine thanks"])]
-GEMINI = {"fingerprint": "gemini", "text": "hello there two clouds only for azure fine thanks",
-          "turns": [{"speaker": "spk:0", "text": "hello there two clouds only for azure"},
-                    {"speaker": "spk:1", "text": "fine thanks"}]}
+            for i, t in enumerate(["hello there", "two clubs", "data bricks lab", "fine thanks", "see you"])]
+GEMINI = {"fingerprint": "gemini", "speakers": ["spk:0", "spk:1"],
+          "text": "hello there two clouds databricks lab five thanks see you monday",
+          "turns": [{"speaker": "spk:0", "text": "hello there two clouds databricks lab"},
+                    {"speaker": "spk:1", "text": "five thanks see you monday"}]}
+SARVAM = {"fingerprint": "sarvam", "text": "hello there two clouds data bricks lab fine thanks see you tuesday"}
 
 
-def choose(call_id, span_id, system):
-    """The A/B letter that points at a given system for this span's randomised order."""
-    return "A" if a_is_whisper(call_id, span_id) == (system == "whisper") else "B"
+def letter(call_id, span_id, system):
+    return "ABC"[candidate_order(call_id, span_id).index(system)]
 
 
-def test_consensus_copies_the_chosen_candidate_and_keeps_agreed_text():
-    rows = align_to_segments(SEGMENTS, GEMINI["text"])
+def test_majority_decides_where_two_systems_agree_and_only_three_way_splits_are_disputed():
+    rows = {r["id"]: r["outcome"] for r in vote(SEGMENTS, GEMINI["text"], SARVAM["text"], 0.9)}
+    # 0: all agree. 1: Gemini and Sarvam outvote Whisper. 2: formatting only. 3: Whisper and Sarvam agree.
+    # 4: three different endings ("see you", "monday", "tuesday").
+    assert rows == {0: "agreed", 1: "majority_gemini_sarvam", 2: "agreed", 3: "majority_whisper", 4: "disputed"}
+
+
+def test_consensus_uses_majority_text_and_copies_the_chosen_candidate():
+    rows = vote(SEGMENTS, GEMINI["text"], SARVAM["text"], 0.9)
     spans = disputed_spans(SEGMENTS, rows)
-    # The model's retyped text is ignored when it picks a candidate.
+    assert [s["segment_ids"] for s in spans] == [[4]]
     resolution = Resolution(speakers=[{"label": "spk:0", "role": "agent"}, {"label": "spk:1", "role": "prospect"}],
-                            spans=[{"span_id": 0, "choice": choose("Ctest", 0, "gemini"), "text": "retyped", "unclear": False}])
-    out, dropped = build_consensus("Ctest", SEGMENTS, rows, spans, resolution, {0: "spk:0", 1: "spk:0", 2: "spk:0", 3: "spk:1"})
-    assert [(s["id"], s["source"], s["text"], s["role"]) for s in out] == [
-        (0, "agreed", "hello there", "agent"), (1, "chose_gemini", "two clouds only for azure", "agent"),
-        (3, "agreed", "fine thanks", "prospect")]
-    assert out[1]["merged_ids"] == [1, 2] and (out[1]["start"], out[1]["end"]) == (2.0, 6.0) and dropped == []
+                            spans=[{"span_id": 0, "choice": letter("Ctest", 0, "whisper"), "text": "retyped",
+                                    "unclear": False}])
+    out, dropped = build_consensus("Ctest", SEGMENTS, rows, spans, resolution, {0: "spk:0", 1: "spk:0", 4: "spk:1"})
+    assert [(s["id"], s["source"], s["text"]) for s in out] == [
+        (0, "agreed", "hello there"), (1, "majority_gemini_sarvam", "two clouds"), (2, "agreed", "data bricks lab"),
+        (3, "majority_whisper", "fine thanks"), (4, "resolved_whisper", "see you")]
+    assert out[0]["role"] == "agent" and out[4]["role"] == "prospect" and dropped == []
 
 
-def test_a_span_with_no_speech_is_dropped_not_kept_as_empty_evidence():
-    rows = align_to_segments(SEGMENTS, GEMINI["text"])
-    spans = disputed_spans(SEGMENTS, rows)
-    resolution = Resolution(speakers=[], spans=[{"span_id": 0, "choice": "neither", "text": " ", "unclear": False}])
-    out, dropped = build_consensus("Ctest", SEGMENTS, rows, spans, resolution, {})
-    assert [s["id"] for s in out] == [0, 3] and dropped == [[1, 2]]
+def test_short_text_must_match_exactly_while_long_text_tolerates_formatting():
+    assert not resolve.similar("fine thanks", "five thanks", 0.9)
+    assert resolve.similar("Data bricks lab", "databricks lab", 0.9)
+    assert resolve.similar("we will share the curriculum on whatsapp today", "we will share the curriculam on whatsapp today", 0.9)
+
+
+def test_candidate_order_is_a_stable_shuffle_of_all_three_systems():
+    orders = {tuple(candidate_order("Ctest", span)) for span in range(12)}
+    assert all(sorted(o) == ["gemini", "sarvam", "whisper"] for o in orders) and len(orders) > 1
+    assert candidate_order("Ctest", 3) == candidate_order("Ctest", 3)
 
 
 def resolver(tmp_path, monkeypatch, decisions):
@@ -46,7 +65,7 @@ def resolver(tmp_path, monkeypatch, decisions):
     monkeypatch.setenv("GEMINI_API_KEY", "synthetic-test-key")
     monkeypatch.setattr(resolve, "opus_audio", lambda path: b"synthetic-opus")
     store = Store(tmp_path)
-    write_json(store.path("audio", "Ctest.json"), {"file": "synthetic.wav", "duration_seconds": 8})
+    write_json(store.path("audio", "Ctest.json"), {"file": "synthetic.wav", "duration_seconds": 10})
     body = {"speakers": [{"label": "spk:0", "role": "agent"}], "spans": decisions}
 
     def respond(request):
@@ -58,18 +77,18 @@ def resolver(tmp_path, monkeypatch, decisions):
 
 
 def test_resolver_writes_consensus_and_settles_reported_usage(tmp_path, monkeypatch):
-    decision = {"span_id": 0, "choice": choose("Ctest", 0, "whisper"), "text": "two clubs only on azure", "unclear": False}
+    decision = {"span_id": 0, "choice": letter("Ctest", 0, "sarvam"), "text": "", "unclear": False}
     res, store = resolver(tmp_path, monkeypatch, [decision])
-    artifact = res.resolve({"call_id": "Ctest"}, {"fingerprint": "whisper", "segments": SEGMENTS}, GEMINI)
-    assert artifact["decisions"] == {"agreed": 2, "chose_whisper": 1} and artifact["speaker_roles"] == {"spk:0": "agent"}
+    artifact = res.resolve({"call_id": "Ctest"}, {"fingerprint": "whisper", "segments": SEGMENTS}, GEMINI, SARVAM)
+    assert artifact["decisions"]["resolved_sarvam"] == 1 and artifact["segment_outcomes"]["disputed"] == 1
+    assert artifact["segments"][-1]["text"] == "see you tuesday"
     [entry] = read_json(store.path("api-budget.json"))["requests"].values()
     assert entry["status"] == "usage_reported" and entry["inr"] == pytest.approx(res.cost(900, 380))
-    assert store.path("asr", "consensus", "Ctest.json").exists()
 
 
 def test_resolver_rejects_an_incomplete_decision_list(tmp_path, monkeypatch):
     res, store = resolver(tmp_path, monkeypatch, [])
     with pytest.raises(ValueError, match="every disputed span"):
-        res.resolve({"call_id": "Ctest"}, {"fingerprint": "whisper", "segments": SEGMENTS}, GEMINI)
+        res.resolve({"call_id": "Ctest"}, {"fingerprint": "whisper", "segments": SEGMENTS}, GEMINI, SARVAM)
     assert [e["status"] for e in store.events()] == ["failed"]
     assert not store.path("asr", "consensus", "Ctest.json").exists()

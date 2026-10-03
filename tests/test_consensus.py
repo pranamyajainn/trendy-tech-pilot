@@ -1,9 +1,4 @@
-from trendytech_pilot.consensus import (
-    align_to_segments,
-    disputed_spans,
-    segment_speakers,
-    transcript_agreement,
-)
+from trendytech_pilot.consensus import align_to_segments, segment_speakers, transcript_agreement
 
 BASE = [{"id": 0, "text": "Hello, I am calling about the course."},
         {"id": 1, "text": "I think 38 May should be suitable."},
@@ -41,16 +36,6 @@ def test_formatting_differences_are_tolerated_but_content_differences_are_not():
     rows = by_id(align_to_segments(segments, "databricks at 7 30 two clouds"))
     assert rows[0]["agreement"] < 1 and rows[0]["char_agreement"] == 1.0
     assert rows[1]["char_agreement"] < 0.9
-
-
-def test_disputed_segments_group_into_consecutive_spans():
-    segments = [{"id": i, "text": t, "start": i * 2.0, "end": i * 2.0 + 2}
-                for i, t in enumerate(["hello there", "two clubs", "only on azure", "fine", "bye now"])]
-    rows = align_to_segments(segments, "hello there two clouds only for azure fine bye")
-    spans = disputed_spans(segments, rows)
-    assert [s["segment_ids"] for s in spans] == [[1, 2], [4]]
-    assert (spans[0]["start"], spans[0]["end"]) == (2.0, 6.0)
-    assert spans[0]["base_text"] == "two clubs only on azure" and spans[0]["other_text"] == "two clouds only for azure"
 
 
 def test_speaker_labels_follow_the_aligned_words():

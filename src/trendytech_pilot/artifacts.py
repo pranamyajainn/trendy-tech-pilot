@@ -4,13 +4,15 @@ from .audio import ASR_VERSION
 from .extract import PROMPT_VERSION, SYSTEM, extraction_fingerprint, generation_config
 from .models import LOCAL_REVISIONS
 from .remote_asr import GEMINI_ASR
+from .remote_sarvam import SARVAM_ASR
 from .resolve import RESOLVER
 from .schema import EVIDENCE_RULES_VERSION
 from .storage import digest, read_json
 
-# Method v2 (3 Oct 2026): extraction reads the consensus of Whisper and Gemini Transcribe, resolved by Gemini Pro.
+# Method v2 (3 Oct 2026): extraction reads the three-system consensus of Whisper, Gemini Transcribe and Sarvam,
+# with Gemini Pro resolving only stretches where all three disagree.
 TRANSCRIPT_SOURCE = "consensus"
-CONSENSUS_METHOD = {"second_asr": GEMINI_ASR, "resolver": RESOLVER}
+CONSENSUS_METHOD = {"second_asr": GEMINI_ASR, "third_asr": SARVAM_ASR, "resolver": RESOLVER}
 
 
 def current_transcript(store, call_id):
@@ -37,13 +39,15 @@ def current_transcript(store, call_id):
 def current_consensus(store, call_id):
     """The consensus is current only if every link is: audio, Whisper, Gemini Transcribe and resolver settings."""
     whisper = current_transcript(store, call_id)
-    path, gemini_path = store.path("asr", "consensus", call_id + ".json"), store.path("asr", "gemini", call_id + ".json")
-    if not whisper or not path.exists() or not gemini_path.exists():
+    paths = [store.path("asr", name, call_id + ".json") for name in ("consensus", "gemini", "sarvam")]
+    if not whisper or not all(p.exists() for p in paths):
         return None
-    consensus, gemini = read_json(path), read_json(gemini_path)
+    consensus, gemini, sarvam = (read_json(p) for p in paths)
     audio = read_json(store.path("audio", call_id + ".json"))
     if (gemini.get("fingerprint") != digest([audio["sha256"], GEMINI_ASR])
-            or consensus.get("fingerprint") != digest([whisper["fingerprint"], gemini["fingerprint"], RESOLVER])):
+            or sarvam.get("fingerprint") != digest([audio["sha256"], SARVAM_ASR])
+            or consensus.get("fingerprint") != digest([whisper["fingerprint"], gemini["fingerprint"],
+                                                       sarvam["fingerprint"], RESOLVER])):
         return None
     frozen_path = store.path("method-freeze.json")
     if frozen_path.exists() and read_json(frozen_path).get("consensus") != CONSENSUS_METHOD:

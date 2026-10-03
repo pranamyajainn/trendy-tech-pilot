@@ -71,27 +71,6 @@ def segment_speakers(base_segments, turns):
     return {segment_id: (c.most_common(1)[0][0] if c else None) for segment_id, c in votes.items()}
 
 
-def disputed_spans(base_segments, rows, threshold=0.9):
-    """Group consecutive segments whose formatting-tolerant similarity falls below the threshold."""
-    by_id = {s["id"]: s for s in base_segments}
-    spans, last_position = [], None
-    for position, row in enumerate(rows):
-        if row["char_agreement"] >= threshold:
-            continue
-        if last_position is None or position != last_position + 1:
-            spans.append({"segment_ids": [], "base_text": [], "other_text": []})
-        span = spans[-1]
-        span["segment_ids"].append(row["id"])
-        span["base_text"].append(by_id[row["id"]]["text"])
-        span["other_text"].append(row["other_text"])
-        last_position = position
-    for index, span in enumerate(spans):
-        first, last = by_id[span["segment_ids"][0]], by_id[span["segment_ids"][-1]]
-        span.update(span_id=index, start=first["start"], end=last["end"],
-                    base_text=" ".join(span["base_text"]), other_text=" ".join(t for t in span["other_text"] if t))
-    return spans
-
-
 def transcript_agreement(base_segments, other_text):
     """Share of words two systems agree on across a whole call: max(len) in the denominator counts both
     omissions and insertions. 1.0 means identical comparable words."""

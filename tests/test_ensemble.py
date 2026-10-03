@@ -20,9 +20,8 @@ PRICE = {"category": "price", "concern": "Too costly", "evidence": ev(10, "too c
 INTENT = {"kind": "payment_intent", "description": "Will pay today", "evidence": ev(20, "pay today")}
 
 
-def verdicts(*kinds, corrected=None):
-    return {i: ClaimVerdict(claim_id=i, verdict=k, reason="r",
-                            corrected_resolution=corrected if k == "overstated" else None) for i, k in enumerate(kinds)}
+def verdicts(*kinds, **purpose):
+    return {i: ClaimVerdict(claim_id=i, verdict=k, reason="r", **(purpose if i == 0 else {})) for i, k in enumerate(kinds)}
 
 
 def test_claims_carry_their_cited_segments():
@@ -31,62 +30,60 @@ def test_claims_carry_their_cited_segments():
     assert claims[2]["segments"] == [10, 11, 12] and "Resolution: resolved" in claims[2]["statement"]
 
 
-def test_agreed_and_cross_verified_claims_enter_findings():
-    p = extraction(facts=[ROLE])
-    s = extraction(facts=[{**ROLE, "evidence": ev(4, "engineer")}])
-    merged, review, tiers = merge(p, s, claims_of(p), claims_of(s), verdicts("supported", "supported"),
-                                  verdicts("supported", "supported"))
-    assert merged["facts"] == [ROLE] and tiers == {"agreed_verified": 1} and review == []
+def test_supported_claims_enter_findings_and_unsupported_ones_go_to_review():
+    x = extraction(facts=[ROLE], signals=[INTENT])
+    merged, review, tiers = merge(x, claims_of(x), verdicts("supported", "supported", "unsupported"))
+    assert merged["facts"] == [ROLE] and merged["signals"] == []
+    assert tiers == {"verified": 1, "needs_review": 1} and review[0]["collection"] == "signals"
 
 
-def test_overstated_resolution_is_lowered_and_unsupported_claims_go_to_review():
-    p = extraction(objections=[PRICE], signals=[INTENT])
-    s = extraction()
-    merged, review, tiers = merge(p, s, claims_of(p), claims_of(s),
-                                  {**verdicts("supported", "unsupported"),
-                                   2: ClaimVerdict(claim_id=2, verdict="overstated", reason="answered, not accepted",
-                                                   corrected_resolution="partly_addressed")},
-                                  verdicts("supported"))
-    assert [o["resolution"] for o in merged["objections"]] == ["partly_addressed"]
-    assert merged["objections"][0]["resolution_evidence"] is None
-    assert merged["signals"] == [] and review[0]["collection"] == "signals" and review[0]["tier"] == "needs_review"
-    assert tiers == {"verified_corrected": 1, "needs_review": 1}
+def test_overstated_resolution_is_lowered_rather_than_dropped():
+    x = extraction(objections=[PRICE])
+    v = {0: ClaimVerdict(claim_id=0, verdict="supported", reason="r"),
+         1: ClaimVerdict(claim_id=1, verdict="overstated", reason="answered, not accepted",
+                         corrected_resolution="partly_addressed")}
+    merged, review, tiers = merge(x, claims_of(x), v)
+    assert merged["objections"][0]["resolution"] == "partly_addressed"
+    assert merged["objections"][0]["resolution_evidence"] is None and tiers == {"verified_corrected": 1} and review == []
 
 
-def test_a_claim_found_by_one_model_needs_the_other_family_to_confirm_it():
-    p = extraction()
-    s = extraction(signals=[INTENT])
-    merged, _, tiers = merge(p, s, claims_of(p), claims_of(s), verdicts("supported"), verdicts("supported", "supported"))
-    assert merged["signals"] == [INTENT] and tiers == {"single_verified": 1}
+def test_overstated_signal_goes_to_review():
+    x = extraction(signals=[INTENT])
+    merged, review, _ = merge(x, claims_of(x), verdicts("supported", "overstated"))
+    assert merged["signals"] == [] and review[0]["verdict"] == "overstated"
+
+
+def test_verifier_corrects_call_type_only_when_a_purpose_quote_exists():
+    x = extraction("brief_followup")
+    merged, review, _ = merge(x, claims_of(x), verdicts("unsupported", corrected_conversation_type="sales"))
+    assert merged["conversation_type"] == "sales" and review[0]["tier"] == "corrected"
+    y = {**extraction("unusable"), "purpose_evidence": None}
+    merged, review, _ = merge(y, claims_of(y), verdicts("unsupported", corrected_conversation_type="sales"))
+    assert merged["conversation_type"] == "unusable" and review[0]["tier"] == "needs_review"
 
 
 def test_service_calls_keep_profile_facts_but_not_sales_content():
-    p = extraction("learner_support", facts=[ROLE], pitches=[{"topic": "Live sessions", "evidence": ev(5, "live"),
+    x = extraction("learner_support", facts=[ROLE], pitches=[{"topic": "Live sessions", "evidence": ev(5, "live"),
                                                              "prospect_response": None, "response_evidence": None}])
-    merged, review, tiers = merge(p, p, claims_of(p), claims_of(p), verdicts("supported", "supported", "supported"),
-                                  verdicts("supported", "supported", "supported"))
+    merged, review, tiers = merge(x, claims_of(x), verdicts("supported", "supported", "supported"))
     assert merged["facts"] == [ROLE] and merged["pitches"] == []
-    assert tiers == {"agreed_verified": 1, "excluded_service_call": 1} and review[0]["tier"] == "excluded_service_call"
-
-
-def test_conversation_type_disagreement_is_resolved_by_verification_and_recorded():
-    p, s = extraction("brief_followup"), extraction("sales")
-    merged, review, _ = merge(p, s, claims_of(p), claims_of(s), verdicts("unsupported"), verdicts("supported"))
-    assert merged["conversation_type"] == "sales" and review[0]["collection"] == "conversation_type"
+    assert tiers == {"verified": 1, "excluded_service_call": 1} and review[0]["tier"] == "excluded_service_call"
 
 
 def test_consensus_is_current_only_when_every_link_is(tmp_path, monkeypatch):
     from trendytech_pilot import artifacts
     from trendytech_pilot.remote_asr import GEMINI_ASR
+    from trendytech_pilot.remote_sarvam import SARVAM_ASR
     from trendytech_pilot.resolve import RESOLVER
     store = Store(tmp_path)
     whisper = {"fingerprint": "whisper", "flags": [], "duration_seconds": 60, "segments": []}
     monkeypatch.setattr(artifacts, "current_transcript", lambda store, cid: whisper)
     write_json(store.path("audio", "Ctest.json"), {"sha256": "audio"})
-    gemini_fp = digest(["audio", GEMINI_ASR])
+    gemini_fp, sarvam_fp = digest(["audio", GEMINI_ASR]), digest(["audio", SARVAM_ASR])
     write_json(store.path("asr", "gemini", "Ctest.json"), {"fingerprint": gemini_fp})
-    write_json(store.path("asr", "consensus", "Ctest.json"),
-               {"fingerprint": digest(["whisper", gemini_fp, RESOLVER]), "segments": [{"id": 0, "text": "hi"}]})
+    write_json(store.path("asr", "sarvam", "Ctest.json"), {"fingerprint": sarvam_fp})
+    write_json(store.path("asr", "consensus", "Ctest.json"), {"fingerprint": digest(["whisper", gemini_fp, sarvam_fp, RESOLVER]),
+                                                              "segments": [{"id": 0, "text": "hi"}]})
     assert artifacts.current_consensus(store, "Ctest")["duration_seconds"] == 60
     monkeypatch.setitem(RESOLVER, "threshold", 0.5)  # Any resolver setting change makes the consensus stale.
     assert artifacts.current_consensus(store, "Ctest") is None

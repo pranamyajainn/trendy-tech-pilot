@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 
 from .storage import Store, digest, read_json, write_json
 
-PROVIDERS = ("local", "gemini", "groq", "ensemble")
+PROVIDERS = ("local", "gemini", "verified")
 
 
 def selected_calls(store, split="development", limit=None, call_ids=None):
@@ -42,12 +42,9 @@ def llm_model_for(provider):
     if provider == "gemini":
         from .remote import GeminiExtractor
         return GeminiExtractor.model_id
-    if provider == "groq":
-        from .remote_groq import GroqExtractor
-        return GroqExtractor.model_id
-    if provider == "ensemble":
-        from .ensemble import ENSEMBLE_MODEL
-        return ENSEMBLE_MODEL
+    if provider == "verified":
+        from .ensemble import VERIFIED_MODEL
+        return VERIFIED_MODEL
     return os.getenv("PILOT_LLM_MODEL", "mlx-community/Qwen3.5-27B-4bit")
 
 
@@ -95,7 +92,7 @@ def main():
     audit.add_argument("workbook", type=Path)
     sample = commands.add_parser("select")
     sample.add_argument("--seed", default="trendytech-pilot-v1")
-    for command in ["download", "transcribe", "cross-transcribe", "resolve", "extract"]:
+    for command in ["download", "transcribe", "cross-transcribe", "sarvam-transcribe", "resolve", "extract"]:
         sub = commands.add_parser(command)
         sub.add_argument("--split", choices=["development", "holdout", "all"], default="development")
         sub.add_argument("--limit", type=int)
@@ -155,19 +152,26 @@ def main():
             from .resolve import GeminiResolver
             worker = GeminiResolver(store)
         elif args.command == "extract":
-            if provider == "ensemble":
+            if provider == "verified":
+                from .ensemble import GeminiProVerifier
                 from .remote import GeminiExtractor
-                from .remote_groq import GroqExtractor
-                worker = (GeminiExtractor(store), GroqExtractor(store))
+                worker = (GeminiExtractor(store), GeminiProVerifier(store))
             elif provider == "gemini":
                 from .remote import GeminiExtractor
                 worker = GeminiExtractor(store)
-            elif provider == "groq":
-                from .remote_groq import GroqExtractor
-                worker = GroqExtractor(store)
             else:
                 from .extract import LocalExtractor
                 worker = LocalExtractor(llm_model)
+        if args.command == "sarvam-transcribe":
+            # Batch jobs of up to 20 calls each, rather than one request per call.
+            from .remote_sarvam import SarvamTranscriber
+            results = SarvamTranscriber(store).transcribe_batch(calls, args.force)
+            for i, call in enumerate(calls, 1):
+                outcome = results.get(call["call_id"], "NotRun")
+                print(f"{i}/{len(calls)} {call['call_id']} sarvam-transcribe {'OK' if outcome == 'OK' else 'FAILED ' + outcome}")
+            failures = [cid for cid, outcome in results.items() if outcome != "OK"]
+            print(json.dumps({"attempted": len(calls), "failed": len(failures), "failed_call_ids": failures}), flush=True)
+            raise SystemExit(1 if failures else 0)
         failures = []
         for i, call in enumerate(calls, 1):
             try:
@@ -182,13 +186,13 @@ def main():
                 elif args.command == "resolve":
                     from .artifacts import current_transcript
                     whisper = current_transcript(store, call["call_id"])
-                    gemini_path = store.path("asr", "gemini", call["call_id"] + ".json")
-                    if whisper is None or not gemini_path.exists():
-                        raise ValueError("Both transcripts must exist before resolution")
-                    worker.resolve(call, whisper, read_json(gemini_path), args.force)
-                elif provider == "ensemble":
-                    from .ensemble import ensemble_extract
-                    ensemble_extract(call, store, *worker, args.force)
+                    others = [store.path("asr", name, call["call_id"] + ".json") for name in ("gemini", "sarvam")]
+                    if whisper is None or not all(p.exists() for p in others):
+                        raise ValueError("All three transcripts must exist before resolution")
+                    worker.resolve(call, whisper, *(read_json(p) for p in others), args.force)
+                elif provider == "verified":
+                    from .ensemble import verified_extract
+                    verified_extract(call, store, *worker, args.force)
                 else:
                     from .extract import extract_call
                     extract_call(call, store, worker, args.force)

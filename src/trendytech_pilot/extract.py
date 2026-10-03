@@ -91,14 +91,12 @@ LOCAL_GENERATION = {"max_tokens": 2200, "enable_thinking": False, "temperature":
 
 def generation_config(model):
     from .remote import GeminiExtractor
-    from .remote_groq import GroqExtractor
 
-    if model.startswith("ensemble:"):
-        from .ensemble import ENSEMBLE_GENERATION
+    if model.startswith("verified:"):
+        from .ensemble import VERIFIED_GENERATION
 
-        return ENSEMBLE_GENERATION
-    return {GeminiExtractor.model_id: GeminiExtractor.generation,
-            GroqExtractor.model_id: GroqExtractor.generation}.get(model, LOCAL_GENERATION)
+        return VERIFIED_GENERATION
+    return GeminiExtractor.generation if model == GeminiExtractor.model_id else LOCAL_GENERATION
 
 
 def extraction_user_prompt(transcript):
