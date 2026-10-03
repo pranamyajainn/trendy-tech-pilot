@@ -1,7 +1,8 @@
-"""Build the private pilot readout from the same JSON used by the workbook."""
+"""Build the client report from the same JSON as the client workbook. No costs or processing details."""
 
 import json
 import sys
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -11,40 +12,13 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Inches, Pt, RGBColor
 
-CALL_TYPES = {"sales": "Pre-sale conversations", "enrollment_or_payment": "Enrollment or payment",
-              "learner_support": "Existing-learner support", "administrative": "Administrative",
-              "brief_followup": "Brief follow-ups", "unusable": "Unusable (voicemail, no conversation)",
-              "unclear": "Unclear purpose"}
-SIGNALS = {"price_question": "Asked about price", "payment_intent": "Stated intent to pay or enroll",
-           "payment_claim": "Said they had paid", "followup_agreed": "Agreed a follow-up",
-           "demo_requested": "Asked for a demo or samples", "low_interest": "Low interest",
-           "no_time": "Short of time", "not_a_fit": "Not a fit", "do_not_contact": "Asked not to be contacted",
-           "goal": "Stated a career goal", "urgency": "Urgency", "other": "Other"}
-COVERAGE = {"qualification": "Qualification (role, experience, interest or budget stated)",
-            "discovery": "Discovery (goal, target role or timing stated)", "pitch": "Value proposition pitched",
-            "objection_handling": "Agent response recorded (calls with objections)",
-            "closing": "Next step agreed, demo requested or payment intent"}
-
-
-def label(key):
-    return key.replace("_", " ").capitalize()
-
-
-def clock(seconds):
-    return "?" if seconds is None else f"{int(seconds) // 60}:{int(seconds) % 60:02d}"
-
 
 def build(root):
-    def read(name, default=None):
-        path = root / "exports" / (name + ".json")
-        return json.loads(path.read_text()) if path.exists() else default
+    def read(name):
+        return json.loads((root / "exports" / "client" / (name + ".json")).read_text())
 
-    overview, worklist = read("overview"), read("worklist")
-    findings = read("findings", {})
-    key_path = root / "review" / "key-findings.json"
-    key_findings = json.loads(key_path.read_text())["findings"] if key_path.exists() else []
-    qa_path = root / "qa" / "status.json"
-    qa = json.loads(qa_path.read_text()) if qa_path.exists() else {}
+    meta, insights, actions = read("meta"), read("sales_insights"), read("lead_actions")
+    validation = meta.get("validation", {})
     doc = Document()
     section = doc.sections[0]
     section.top_margin = section.bottom_margin = Inches(.65)
@@ -60,172 +34,89 @@ def build(root):
     doc.styles["Heading 2"].font.size = Pt(11)
     for border in doc.styles.element.xpath(".//w:pBdr"):
         border.getparent().remove(border)
-    doc.core_properties.title = "TrendyTech call intelligence pilot review"
+    doc.core_properties.title = "TrendyTech sales call review"
     doc.core_properties.author = "TrendyTech Pilot Team"
 
-    def para(text, style=None):
-        return doc.add_paragraph(text, style)
+    def para(text, style=None, bold_prefix=None):
+        p = doc.add_paragraph(style=style)
+        if bold_prefix:
+            p.add_run(bold_prefix).bold = True
+        p.add_run(text)
+        return p
 
     def table(headers, rows):
         t = doc.add_table(rows=1, cols=len(headers))
         t.style = "Table Grid"
         for cell, title in zip(t.rows[0].cells, headers):
             cell.text = title
-            props = cell._tc.get_or_add_tcPr()
             shade = OxmlElement("w:shd")
             shade.set(qn("w:fill"), "243B53")
-            props.append(shade)
+            cell._tc.get_or_add_tcPr().append(shade)
             for run in cell.paragraphs[0].runs:
                 run.bold = True
                 run.font.color.rgb = RGBColor(255, 255, 255)
-        borders = OxmlElement("w:tblBorders")
-        for edge in ["top", "left", "bottom", "right", "insideH", "insideV"]:
-            element = OxmlElement("w:" + edge)
-            for key, value in [("val", "single"), ("sz", "4"), ("color", "D9D9D9")]:
-                element.set(qn("w:" + key), value)
-            borders.append(element)
-        t._tbl.tblPr.append(borders)
-        for i, values in enumerate(rows):
-            row = t.add_row()
-            for cell, text in zip(row.cells, values):
+        for values in rows:
+            for cell, text in zip(t.add_row().cells, values):
                 cell.text = str(text)
-                if i % 2:
-                    shade = OxmlElement("w:shd")
-                    shade.set(qn("w:fill"), "F2F5F8")
-                    cell._tc.get_or_add_tcPr().append(shade)
-        # Keep rows whole across pages and repeat the header row on a continuation page.
         for index, row in enumerate(t.rows):
             props = row._tr.get_or_add_trPr()
             props.append(OxmlElement("w:cantSplit"))
             if index == 0:
                 props.append(OxmlElement("w:tblHeader"))
         para("")
-        return t
 
-    def cite(example):
-        return f"{example['lead_alias']}, call {example['call_id']} at {clock(example.get('start_seconds'))}"
+    para("TrendyTech sales call review", "Title")
+    para(datetime.now(ZoneInfo("Asia/Kolkata")).strftime("%d %B %Y")
+         + ("  |  Review draft" if meta.get("review_draft") else ""))
+    para(meta["scope_note"])
+    para(f"We reviewed 300 recorded calls across 50 leads from the September 2026 call export to answer two "
+         f"questions: what should change in the sales approach, and what should happen next with each lead. "
+         f"This report gives {len(insights)} findings and a recommended next action for each of the "
+         f"{len(actions)} leads. Every finding and action points to the call and moment it came from.")
 
-    analysed, sales = findings.get("analysed_calls", overview["analysed_calls"]), findings.get("sales_facing_calls", 0)
-    para("TrendyTech call intelligence pilot review", "Title")
-    para(datetime.now(ZoneInfo("Asia/Kolkata")).strftime("%d %B %Y") + "  |  Private review copy")
-    para(f"We selected {overview['selected_calls']} recordings across {overview['selected_leads']} leads to test whether call history can produce useful sales guidance. "
-         f"Calls with an extraction that passed automated evidence checks: {overview['analysed_calls']}. "
-         "Every finding below links to the call and moment it came from. Independent accuracy review is described in the validation section.")
-    table(["Pilot measure", "Result"], [
-        ["Calls with current extraction", f"{overview['analysed_calls']} / {overview['selected_calls']}"],
-        ["Journeys with all available calls extracted", f"{overview['complete_extracted_journeys']} / {overview['selected_leads']}"],
-        ["Leads reserved for independent QA", overview["holdout_leads"]],
-        ["External API spend", f"INR {overview['costs']['external_api_spend_inr']:.2f}"],
-        ["Verified conversion prediction", "Unavailable without verified outcomes"],
-    ])
+    para("What should change in the sales approach", "Heading 1")
+    for index, insight in enumerate(insights, 1):
+        para(f"{index}. {insight['finding']}", "Heading 2")
+        para(insight["evidence_and_scale"], bold_prefix="Evidence: ")
+        para(insight["sales_implication"], bold_prefix="Why it matters: ")
+        para(insight["recommended_change"], bold_prefix="Recommended change: ")
+        para(insight["suggested_wording"], bold_prefix="Proposed wording: ")
+        para(insight["how_to_assess"], bold_prefix="How to check it worked: ")
+        para(insight["source"], bold_prefix="Source: ")
 
-    para("Key findings", "Heading 1")
-    if key_findings:
-        for item in key_findings:
-            para(item["title"], "Heading 2")
-            para(item["detail"])
-            for example in item.get("evidence", [])[:3]:
-                para(f"“{example['quote']}” ({cite(example)})", "List Bullet")
-    else:
-        para("Key findings are written after the extracted calls have been reviewed. The counts below are descriptive.")
+    para("What to do next with the leads", "Heading 1")
+    table(["Recommended action", "Leads"], Counter(a["action_category"] for a in actions).most_common())
+    para("The Lead Actions sheet lists every lead with a specific next step, an opening question, and the "
+         "recorded moment that supports it. Recommendations reflect the calls as recorded; confirm each lead's "
+         "current status before contacting them.")
+    for action in [a for a in actions if a["action_category"] in
+                   ("Resolve a purchase condition", "Answer a specific concern")][:4]:
+        para(f"Lead {action['lead_identifier']}: {action['action_category']}", "Heading 2")
+        para(action["latest_position"], bold_prefix="Position: ")
+        para(action["recommended_next_action"], bold_prefix="Next action: ")
+        para(action["suggested_wording"], bold_prefix="Opening question: ")
 
-    para("What the calls contain", "Heading 1")
-    if analysed:
-        for kind, count in findings.get("call_types", {}).items():
-            para(f"{CALL_TYPES.get(kind, label(kind))}: {count} of {analysed} analysed calls.", "List Bullet")
-        para("Learner-support and administrative calls are kept out of sales signals, so service work is not mistaken for buying interest.")
-    else:
-        para("Call content findings are pending successful extraction. Source-file counts alone are not conversation analysis.")
-
-    if sales:
-        para("Who the prospects are", "Heading 1")
-        stated = findings.get("profile_fields_stated_in_sales_calls", {})
-        para(f"Across {sales} pre-sale and enrollment conversations, prospects most often stated: "
-             + ", ".join(f"{label(k).lower()} ({v} calls)" for k, v in list(stated.items())[:6]) + ".")
-        # Single mentions are often ASR variants of the same phrase, so only repeated values are listed.
-        for name, values in [("current roles", findings.get("common_current_roles", {})),
-                             ("technology interests", findings.get("common_technology_interests", {}))]:
-            repeated = {k: v for k, v in values.items() if v > 1}
-            if repeated:
-                para(f"Repeated {name}: " + ", ".join(f"{k} ({v})" for k, v in repeated.items())
-                     + ". Other values were each mentioned once.")
-
-    objections = findings.get("objections", [])
-    if objections:
-        para("Objections and how they were handled", "Heading 1")
-        para("An objection counts as resolved only when the prospect explicitly accepted the answer. An agent's reply alone is “partly addressed”.")
-        table(["Concern", "Calls", "Resolved", "Partly addressed", "Unresolved", "Unclear"],
-              [[label(o["category"]), o["calls"], o["resolved"], o["partly_addressed"], o["unresolved"], o["unclear"]]
-               for o in objections])
-        para("Every objection, with its quote and timestamp, is listed in the workbook's Evidence sheet.")
-
-    signals = findings.get("signals", [])
-    if signals:
-        para("Buying and follow-up signals", "Heading 1")
-        table(["Signal", "Calls"], [[SIGNALS.get(s["kind"], label(s["kind"])), s["calls"]] for s in signals])
-        para("A payment claim or a sent payment link is not verified payment. Stated intent is not a conversion.")
-
-    coverage = findings.get("quality_coverage", [])
-    if sales and coverage:
-        para("Call-quality evidence coverage", "Heading 1")
-        table(["Dimension", "Calls with evidence"],
-              [[COVERAGE[c["dimension"]], f"{c['calls_with_evidence']} / {c['applicable_calls']}"] for c in coverage])
-        para("These show whether evidence of each step appears in a call. They are not salesperson performance scores. "
-             "Script adherence is unavailable because the approved script was not supplied.")
-
-    complete = [w for w in worklist if w["calls_analysed"] == w["calls_in_export"]]
-    rank = {"Do not contact": 0, "Hot signal": 1, "Warm signal": 2, "Cold signal": 3, "No live conversation": 4,
-            "Service follow-up": 5}
-    chosen = sorted(complete, key=lambda w: (rank.get(w["priority"], 6), w["lead_alias"]))[:5]
-    para("Lead worklist", "Heading 1")
-    priorities = findings.get("worklist_priorities", {})
-    if priorities:
-        table(["Worklist label", "Leads"], [[k, v] for k, v in priorities.items()])
-        para("Labels follow transparent rules based on the last call that reached a person; voicemail is skipped. "
-             "Leads with a CRM Yes flag are routed to enrollment checks. They are not conversion probabilities. "
-             "Recordings are historical: confirm each lead's current status and any request to stop contact before acting.")
-    if not chosen:
-        para("No journey has completed extraction yet. No partial journey is presented as a finished sales assessment.")
-    for w in chosen:
-        para(w["lead_alias"] + "  " + w["priority"], "Heading 2")
-        para(f"{w['calls_in_export']} calls, {w['total_call_minutes_crm']} recorded minutes. Last call: {w['as_of_recorded_call'][:10]}. " + w["priority_reason"])
-        if w["open_objections"]:
-            para("Concerns recorded: " + w["open_objections"][:700])
-        para("Suggested action: " + w["next_action_suggestion"])
-    para("How to trace an answer", "Heading 1")
-    para("Use the lead alias in Worklist, then find its call in Calls. Evidence contains the source quote, call identifier and recording timestamps. Profile changes and historical unresolved objections remain visible for review. An unresolved concern in one call is not automatically still unresolved today.")
-
-    para("Validation and processing cost", "Heading 1")
-    cost = overview["costs"]
-    qa_rows = []
-    if qa:
-        qa_rows = [["Held-out calls with signed transcription review", f"{qa.get('reviewed_calls', 0)} / {qa.get('expected_holdout_calls', 0)}"],
-                   ["Word error rate on reviewed calls", "Not measured" if qa.get("wer") is None else f"{qa['wer']:.1%}"],
-                   ["Reviewed extraction fields", qa.get("reviewed_fields", 0)],
-                   ["Field accuracy on reviewed fields", "Not measured" if qa.get("field_accuracy") is None else f"{qa['field_accuracy']:.1%}"]]
-    table(["Measure", "Result"], [
-        ["Unique transcribed audio minutes", f"{cost['unique_transcribed_audio_minutes']:.0f}"],
-        ["Inference hours including retries and experiments", f"{cost['inference_wall_hours_including_retries']:.1f}"],
-        ["External API INR per audio minute", "Not measured" if cost["external_api_inr_per_audio_minute"] is None
-         else f"INR {cost['external_api_inr_per_audio_minute']:.2f}"],
-        ["Allocated processing INR per minute", cost["processing_inr_per_audio_minute"] if cost["processing_inr_per_audio_minute"] is not None else "Not measured"],
-        ["Proposal processing ceiling", "INR 0.60 per audio minute, subject to satisfactory accuracy"],
-        ["Independent accuracy", overview["accuracy_status"]],
-        *qa_rows,
-    ])
-    para("Electricity, hardware allocation, engineering time, human QA and setup are not free and are not fully measured here. The API figure alone does not establish that the proposal's full processing-cost gate has passed.")
-    para("What needs review before acceptance", "Heading 1")
-    for text in ["Listen to the held-out recordings independently and complete the full-call reference sheets. Include speech that the model missed and mark genuine silence explicitly.",
-                 "Check extracted facts, omissions, speaker attribution, objections and suggested actions. Automatic quote matching only checks that words occur in the transcript.",
-                 "Agree numerical accuracy criteria with the client. The proposal did not specify a numerical accuracy threshold."]:
+    para("How to trace any statement", "Heading 1")
+    para("Each finding and action gives a lead number, call date and time into the recording. Open that call in "
+         "the CRM recording and go to the time shown to hear the original words.")
+    para("Limits of this review", "Heading 1")
+    for text in [("The calls are a selected sample of leads with several recorded calls, so counts describe this "
+                  "sample, not every TrendyTech lead."),
+                 "Recordings are historical. A plan or date mentioned in a call may have changed since.",
+                 "CRM conversion flags were not independently verified, and this review does not predict who will buy.",
+                 "The approved sales script was not available, so script adherence was not assessed."]:
         para(text, "List Bullet")
-    para("Scope and data limits", "Heading 1")
-    para("The sample contains all exported calls for each selected lead; lifetime journey completeness is unconfirmed. Selection favours multi-call journeys and is not representative of archive conversion. CRM blanks mean unknown, and Yes flags lack independently verified purchase dates. The approved script was not supplied, so script adherence is unavailable. Call-quality columns describe provisional evidence coverage rather than validated salesperson performance scores. Speakers are inferred from conversation; the mono recordings are not diarized.")
-    para("Source: client call-metrics export dated 30 September 2026. Pilot scope: proposal SAI-Q-2026-013. The accompanying workbook and private JSON/CSV files contain the supporting records and processing ledger.")
+    if validation.get("complete"):
+        low, high = validation["audit_precision_95ci"]
+        para(f"Reviewers checked all {validation['client_claims']} statements behind these findings and actions "
+             f"against the recordings, and audited a random sample of {validation['audit_reviewed']} extracted "
+             f"statements: {validation['audit_precision']:.0%} were correct (95% range {low:.0%} to {high:.0%}).")
+    else:
+        para("Human checking of these statements against the recordings is in progress; treat this as a review draft.")
     footer = section.footer.paragraphs[0]
-    footer.text = "TrendyTech pilot  |  Private review copy"
+    footer.text = "TrendyTech sales call review" + ("  |  Review draft" if meta.get("review_draft") else "")
     footer.runs[0].font.size = Pt(8)
-    output = root / "deliverables" / "TrendyTech Pilot Review.docx"
+    output = root / "deliverables" / "TrendyTech Sales Call Review.docx"
     output.parent.mkdir(parents=True, exist_ok=True)
     doc.save(output)
     print(output)
