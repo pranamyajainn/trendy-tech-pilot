@@ -237,43 +237,54 @@ class GeminiResolver:
 
     def _ask(self, cid, spans, turns, start):
         """The judge listens to the audio when spans are disputed; without disputed spans only speaker roles are
-        mapped, from sample lines, and no audio is sent."""
+        mapped, from sample lines, and no audio is sent. An incomplete or invalid answer gets one retry that
+        names the problem."""
         model = RESOLVER["model"] if spans else RESOLVER["roles_model"]
-        prompt = resolver_prompt(cid, spans, turns)
+        prompt, feedback, total, usage = resolver_prompt(cid, spans, turns), "", 0.0, {}
         meta = read_json(self.store.path("audio", cid + ".json"))
-        # Speaker roles alone can be judged from sample lines; audio is needed only for disputed spans.
         audio = [{"inlineData": {"mimeType": "audio/ogg", "data": base64.b64encode(opus_audio(meta["file"])).decode()}}]
-        body = {"contents": [{"role": "user", "parts": (audio if spans else []) + [{"text": prompt}]}],
+        try:
+            for attempt in range(2):
+                text, cost, usage = self._request(cid, model, (audio if spans else []), prompt + feedback,
+                                                  meta["duration_seconds"] * 32 if spans else 0)
+                total += cost
+                try:
+                    resolution = Resolution.model_validate(json.loads(text))
+                    decided = sorted(d.span_id for d in resolution.spans)
+                    if decided != [s["span_id"] for s in spans]:
+                        raise ValueError(f"decided span ids {decided} but expected {[s['span_id'] for s in spans]}")
+                    return resolution, total, usage
+                except ValueError as exc:
+                    if attempt:
+                        raise ValueError(f"Resolver answer invalid twice: {str(exc)[:200]}") from None
+                    feedback = (f"\n\nYour previous answer was invalid ({str(exc)[:300]}). Return exactly one decision "
+                                "for every listed span_id, as valid JSON.")
+        except BaseException as exc:
+            self.store.event(stage="resolve", call_id=cid, model=model, error_type=type(exc).__name__,
+                             status="interrupted" if isinstance(exc, KeyboardInterrupt) else "failed",
+                             wall_seconds=time.monotonic() - start, external_cost_inr=total)
+            raise
+
+    def _request(self, cid, model, audio_parts, prompt, audio_tokens):
+        body = {"contents": [{"role": "user", "parts": audio_parts + [{"text": prompt}]}],
                 "generationConfig": {"responseMimeType": "application/json", "responseJsonSchema": SCHEMA,
                                      "thinkingConfig": {"thinkingLevel": RESOLVER["thinking"]},
                                      "maxOutputTokens": self.max_output_tokens}}
-        audio_tokens = meta["duration_seconds"] * 32 if spans else 0
-        cost = 0.0
-        try:
-            with self.budget.reserve(self.cost(audio_tokens + len(prompt.encode()) + 1024, self.max_output_tokens, model),
-                                     call_id=cid, purpose="resolve:" + model) as reservation:
-                response, retries = post_with_busy_retries(
-                    self.client, URL.format(model=model), reservation, self.busy_retry_delays,
-                    headers={"x-goog-api-key": self.key}, json=body)
-                response.raise_for_status()
-                result = response.json()
-                meta_usage = result.get("usageMetadata", {})
-                n_in = meta_usage.get("promptTokenCount")
-                n_out = meta_usage.get("candidatesTokenCount", 0) + meta_usage.get("thoughtsTokenCount", 0)
-                if type(n_in) is not int or n_in < 0 or type(n_out) is not int or n_out < 0:
-                    raise RuntimeError("Provider omitted usage; conservative budget reservation retained")
-                cost, usage = self.cost(n_in, n_out, model), {"input_tokens": n_in, "output_tokens": n_out, "model": model}
-                reservation.settle(cost, call_id=cid, busy_retries=retries, **usage)
-                candidate = result["candidates"][0]
-                if candidate.get("finishReason") not in ("STOP", None):
-                    raise ValueError("Resolver output incomplete; usage has been recorded")
-                text = "".join(p.get("text", "") for p in candidate["content"]["parts"] if not p.get("thought"))
-                resolution = Resolution.model_validate(json.loads(text))
-                if sorted(d.span_id for d in resolution.spans) != [s["span_id"] for s in spans]:
-                    raise ValueError("Resolver must decide every disputed span exactly once")
-                return resolution, cost, usage
-        except BaseException as exc:
-            self.store.event(stage="resolve", call_id=cid, model=self.model_id, error_type=type(exc).__name__,
-                             status="interrupted" if isinstance(exc, KeyboardInterrupt) else "failed",
-                             wall_seconds=time.monotonic() - start, external_cost_inr=cost)
-            raise
+        with self.budget.reserve(self.cost(audio_tokens + len(prompt.encode()) + 1024, self.max_output_tokens, model),
+                                 call_id=cid, purpose="resolve:" + model) as reservation:
+            response, retries = post_with_busy_retries(self.client, URL.format(model=model), reservation,
+                                                       self.busy_retry_delays, headers={"x-goog-api-key": self.key},
+                                                       json=body)
+            response.raise_for_status()
+            result = response.json()
+            meta_usage = result.get("usageMetadata", {})
+            n_in = meta_usage.get("promptTokenCount")
+            n_out = meta_usage.get("candidatesTokenCount", 0) + meta_usage.get("thoughtsTokenCount", 0)
+            if type(n_in) is not int or n_in < 0 or type(n_out) is not int or n_out < 0:
+                raise RuntimeError("Provider omitted usage; conservative budget reservation retained")
+            cost, usage = self.cost(n_in, n_out, model), {"input_tokens": n_in, "output_tokens": n_out, "model": model}
+            reservation.settle(cost, call_id=cid, busy_retries=retries, **usage)
+            candidate = result["candidates"][0]
+            if candidate.get("finishReason") not in ("STOP", None):
+                raise ValueError("Resolver output incomplete; usage has been recorded")
+            return "".join(p.get("text", "") for p in candidate["content"]["parts"] if not p.get("thought")), cost, usage

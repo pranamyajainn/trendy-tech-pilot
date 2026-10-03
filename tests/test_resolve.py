@@ -93,8 +93,9 @@ def test_resolver_writes_consensus_and_settles_reported_usage(tmp_path, monkeypa
 
 def test_resolver_rejects_an_incomplete_decision_list(tmp_path, monkeypatch):
     res, store = resolver(tmp_path, monkeypatch, [])
-    with pytest.raises(ValueError, match="every disputed span"):
+    with pytest.raises(ValueError, match="invalid twice"):
         res.resolve({"call_id": "Ctest"}, {"fingerprint": "whisper", "segments": SEGMENTS}, GEMINI, SARVAM)
+    assert len(res.sent) == 2 and "previous answer was invalid" in json.dumps(res.sent[1])  # One corrective retry.
     assert [e["status"] for e in store.events()] == ["failed"]
     assert not store.path("asr", "consensus", "Ctest.json").exists()
 
