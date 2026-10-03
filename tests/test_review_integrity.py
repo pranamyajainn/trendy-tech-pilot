@@ -59,6 +59,18 @@ def test_qa_rejects_stale_review_even_without_regenerating_sheet(tmp_path):
     assert metrics["reviewed_calls"] == 0 and metrics["ignored_stale_or_duplicate_rows"] == 1
 
 
+def test_field_verdicts_are_case_insensitive_and_need_a_signature(tmp_path, monkeypatch):
+    from trendytech_pilot import quality
+    store, _fingerprint = qa_store(tmp_path, "words")
+    monkeypatch.setattr(quality, "current_extraction", lambda store, cid: {"fingerprint": "extraction"})
+    rows = [{"call_id": "Ctest", "artifact_fingerprint": "extraction", "field": field, "extraction_correct": verdict,
+             "reviewer": "Reviewer" if signed else "", "reviewed_at": "2026-10-04"}
+            for field, verdict, signed in [("goal", " Yes ", True), ("budget", "NO", True), ("course", "yes", False)]]
+    write_csv(store.path("qa", "holdout_field_review.csv"), rows)
+    metrics = quality.evaluate_reviews(store)
+    assert metrics["reviewed_fields"] == 2 and metrics["field_accuracy"] == 0.5
+
+
 def test_model_revision_changes_extraction_identity():
     assert extraction_fingerprint("transcript", "model", "v1") != extraction_fingerprint("transcript", "model", "v2")
 

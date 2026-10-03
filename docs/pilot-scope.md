@@ -52,8 +52,8 @@ automation, calibrated lead probabilities, and controlled conversion-lift experi
 ## Delivery checklist
 
 - [x] 300 downloaded audio files validated with ffprobe, with source manifest and checksums
-- [ ] 300 timestamped transcripts and validated call extractions
-- [ ] 50 export-complete lead journeys and a mini worklist
-- [ ] Structured Excel workbook and plain-language findings report
-- [ ] Held-out QA references reviewed and accuracy measured
-- [ ] Actual runtime and cost ledger with clear inclusions and exclusions
+- [x] 300 timestamped transcripts and evidence-validated call extractions (frozen method; 3 Oct 2026)
+- [x] 50 export-complete lead journeys and a mini worklist
+- [x] Structured Excel workbook and plain-language findings report (review copies; accuracy pending)
+- [ ] Held-out QA references reviewed and accuracy measured (templates ready; needs a human reviewer)
+- [x] Actual runtime and API cost ledger; labour, hardware and setup costs recorded as unmeasured

@@ -93,6 +93,12 @@ def build(root):
                     shade = OxmlElement("w:shd")
                     shade.set(qn("w:fill"), "F2F5F8")
                     cell._tc.get_or_add_tcPr().append(shade)
+        # Keep rows whole across pages and repeat the header row on a continuation page.
+        for index, row in enumerate(t.rows):
+            props = row._tr.get_or_add_trPr()
+            props.append(OxmlElement("w:cantSplit"))
+            if index == 0:
+                props.append(OxmlElement("w:tblHeader"))
         para("")
         return t
 
@@ -136,12 +142,13 @@ def build(root):
         stated = findings.get("profile_fields_stated_in_sales_calls", {})
         para(f"Across {sales} pre-sale and enrollment conversations, prospects most often stated: "
              + ", ".join(f"{label(k).lower()} ({v} calls)" for k, v in list(stated.items())[:6]) + ".")
-        roles = findings.get("common_current_roles", {})
-        if roles:
-            para("Most common current roles: " + ", ".join(f"{k} ({v})" for k, v in list(roles.items())[:6]) + ".")
-        interests = findings.get("common_technology_interests", {})
-        if interests:
-            para("Most common technology interests: " + ", ".join(f"{k} ({v})" for k, v in list(interests.items())[:6]) + ".")
+        # Single mentions are often ASR variants of the same phrase, so only repeated values are listed.
+        for name, values in [("current roles", findings.get("common_current_roles", {})),
+                             ("technology interests", findings.get("common_technology_interests", {}))]:
+            repeated = {k: v for k, v in values.items() if v > 1}
+            if repeated:
+                para(f"Repeated {name}: " + ", ".join(f"{k} ({v})" for k, v in repeated.items())
+                     + ". Other values were each mentioned once.")
 
     objections = findings.get("objections", [])
     if objections:
@@ -150,9 +157,7 @@ def build(root):
         table(["Concern", "Calls", "Resolved", "Partly addressed", "Unresolved", "Unclear"],
               [[label(o["category"]), o["calls"], o["resolved"], o["partly_addressed"], o["unresolved"], o["unclear"]]
                for o in objections])
-        for o in objections[:4]:
-            for example in o["examples"][:1]:
-                para(f"{label(o['category'])}: {example['claim']} — “{example['quote']}” ({cite(example)})", "List Bullet")
+        para("Every objection, with its quote and timestamp, is listed in the workbook's Evidence sheet.")
 
     signals = findings.get("signals", [])
     if signals:
@@ -171,13 +176,13 @@ def build(root):
     complete = [w for w in worklist if w["calls_analysed"] == w["calls_in_export"]]
     rank = {"Do not contact": 0, "Hot signal": 1, "Warm signal": 2, "Cold signal": 3, "No live conversation": 4,
             "Service follow-up": 5}
-    chosen = sorted(complete, key=lambda w: (rank.get(w["priority"], 5), w["lead_alias"]))[:5]
-    doc.add_page_break()
+    chosen = sorted(complete, key=lambda w: (rank.get(w["priority"], 6), w["lead_alias"]))[:5]
     para("Lead worklist", "Heading 1")
     priorities = findings.get("worklist_priorities", {})
     if priorities:
         table(["Worklist label", "Leads"], [[k, v] for k, v in priorities.items()])
-        para("Labels follow transparent rules based on the last available call. They are not conversion probabilities. "
+        para("Labels follow transparent rules based on the last call that reached a person; voicemail is skipped. "
+             "Leads with a CRM Yes flag are routed to enrollment checks. They are not conversion probabilities. "
              "Recordings are historical: confirm each lead's current status and any request to stop contact before acting.")
     if not chosen:
         para("No journey has completed extraction yet. No partial journey is presented as a finished sales assessment.")
@@ -190,7 +195,6 @@ def build(root):
     para("How to trace an answer", "Heading 1")
     para("Use the lead alias in Worklist, then find its call in Calls. Evidence contains the source quote, call identifier and recording timestamps. Profile changes and historical unresolved objections remain visible for review. An unresolved concern in one call is not automatically still unresolved today.")
 
-    doc.add_page_break()
     para("Validation and processing cost", "Heading 1")
     cost = overview["costs"]
     qa_rows = []
@@ -200,9 +204,10 @@ def build(root):
                    ["Reviewed extraction fields", qa.get("reviewed_fields", 0)],
                    ["Field accuracy on reviewed fields", "Not measured" if qa.get("field_accuracy") is None else f"{qa['field_accuracy']:.1%}"]]
     table(["Measure", "Result"], [
-        ["Unique transcribed audio minutes", cost["unique_transcribed_audio_minutes"]],
-        ["Inference hours including retries", cost["inference_wall_hours_including_retries"]],
-        ["External API INR per audio minute", cost["external_api_inr_per_audio_minute"]],
+        ["Unique transcribed audio minutes", f"{cost['unique_transcribed_audio_minutes']:.0f}"],
+        ["Inference hours including retries and experiments", f"{cost['inference_wall_hours_including_retries']:.1f}"],
+        ["External API INR per audio minute", "Not measured" if cost["external_api_inr_per_audio_minute"] is None
+         else f"INR {cost['external_api_inr_per_audio_minute']:.2f}"],
         ["Allocated processing INR per minute", cost["processing_inr_per_audio_minute"] if cost["processing_inr_per_audio_minute"] is not None else "Not measured"],
         ["Proposal processing ceiling", "INR 0.60 per audio minute, subject to satisfactory accuracy"],
         ["Independent accuracy", overview["accuracy_status"]],

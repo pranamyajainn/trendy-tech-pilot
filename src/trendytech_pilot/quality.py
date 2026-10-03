@@ -105,8 +105,9 @@ def evaluate_reviews(store):
             ignored += 1
             continue
         seen_fields.add(key)
-        if row.get("reviewer") and row.get("reviewed_at") and row.get("extraction_correct") in ("yes", "no"):
-            reviewed_fields.append(row)
+        verdict = (row.get("extraction_correct") or "").strip().lower()
+        if row.get("reviewer") and row.get("reviewed_at") and verdict in ("yes", "no"):
+            reviewed_fields.append({**row, "extraction_correct": verdict})
     metrics = {"wer": None, "reference_words": 0, "substitutions": 0, "deletions": 0, "insertions": 0}
     if refs:
         from jiwer import (

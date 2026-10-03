@@ -55,8 +55,9 @@ const counts = [
   {item: 'Calls with evidence-checked extraction', value: overview.analysed_calls},
   {item: 'Journeys with all available calls extracted', value: overview.complete_extracted_journeys},
   {item: 'Held-out leads', value: overview.holdout_leads},
-  {item: 'Unique transcribed audio minutes', value: overview.costs.unique_transcribed_audio_minutes},
-  {item: 'Measured external API spend (INR)', value: overview.costs.external_api_spend_inr},
+  {item: 'Unique transcribed audio minutes', value: Math.round(overview.costs.unique_transcribed_audio_minutes)},
+  {item: 'Measured external API spend (INR)', value: Number(overview.costs.external_api_spend_inr.toFixed(2))},
+  {item: 'External API cost per audio minute (INR)', value: overview.costs.external_api_inr_per_audio_minute == null ? 'Unmeasured' : Number(overview.costs.external_api_inr_per_audio_minute.toFixed(2))},
   {item: 'Full processing cost per minute (INR)', value: overview.costs.processing_inr_per_audio_minute ?? 'Unmeasured'},
   {item: 'Accuracy status', value: overview.accuracy_status},
   {item: 'Worklist use', value: 'Retrospective suggestions as of last exported call. Confirm current status before outreach.'},
@@ -87,7 +88,7 @@ console.log(inspection.ndjson);
 const out = path.join(root, 'deliverables');
 await fs.mkdir(out, {recursive: true});
 for (const sheetName of ['Pilot readout', 'Worklist', 'Journey review', 'Lead profiles', 'Calls', 'Objection summary', 'Signal summary', 'Evidence', 'Processing costs']) {
-  const preview = await workbook.render({sheetName, range: sheetName === 'Pilot readout' || sheetName === 'Processing costs' ? 'A1:B12' : 'A1:F7', scale: 1, format: 'png'});
+  const preview = await workbook.render({sheetName, range: sheetName === 'Pilot readout' ? 'A1:B18' : sheetName === 'Processing costs' ? 'A1:B12' : 'A1:F7', scale: 1, format: 'png'});
   await fs.writeFile(path.join(out, 'preview-' + sheetName.replaceAll(' ', '-') + '.png'), new Uint8Array(await preview.arrayBuffer()));
 }
 const output = await SpreadsheetFile.exportXlsx(workbook);
