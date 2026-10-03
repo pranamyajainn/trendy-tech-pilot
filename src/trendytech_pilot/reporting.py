@@ -10,6 +10,13 @@ from .artifacts import current_extraction
 from .storage import digest, read_json, write_csv, write_json
 
 
+def last_conversation(calls, analyses):
+    """Latest call that reached a person. Voicemail and silent calls carry no buying signal, so a trailing
+    voicemail must not hide what the last real conversation showed."""
+    live = [c for c in calls if analyses[c["call_id"]]["extraction"].get("conversation_type") != "unusable"]
+    return live[-1] if live else None
+
+
 def priority_for(calls, analyses):
     """Heuristic workflow labels, never conversion probabilities."""
     all_signals = {s["kind"] for a in analyses.values() for s in a["extraction"]["signals"]}
@@ -17,20 +24,22 @@ def priority_for(calls, analyses):
         return "Do not contact", "A recorded request to stop contact needs to be respected."
     if any(c["crm_conversion_flag"] == "Yes" for c in calls):
         return "Verify enrollment", "CRM contains a Yes flag; confirm enrollment before further sales follow-up."
-    latest = calls[-1]
-    if latest["call_id"] not in analyses or len(analyses) != len(calls):
+    if calls[-1]["call_id"] not in analyses or len(analyses) != len(calls):
         return "Needs review", "The selected journey has calls without validated extraction."
+    latest = last_conversation(calls, analyses)
+    if latest is None:
+        return "No live conversation", "Every recorded call reached voicemail or had no usable conversation."
     call_type = analyses[latest["call_id"]]["extraction"].get("conversation_type", "unclear")
     if call_type in {"learner_support", "administrative"}:
-        return "Service follow-up", "The last available call concerns learner support or administration."
+        return "Service follow-up", "The last live conversation concerns learner support or administration."
     kinds = {s["kind"] for s in analyses[latest["call_id"]]["extraction"]["signals"]}
     if "payment_intent" in kinds or ("urgency" in kinds and kinds & {"demo_requested", "followup_agreed"}):
-        return "Hot signal", "The last available call contains an explicit purchase or urgent next-step signal."
+        return "Hot signal", "The last live conversation contains an explicit purchase or urgent next-step signal."
     if kinds & {"low_interest", "not_a_fit"}:
-        return "Cold signal", "The last available call contains an explicit lack of interest or fit."
+        return "Cold signal", "The last live conversation contains an explicit lack of interest or fit."
     if kinds & {"followup_agreed", "demo_requested", "price_question", "goal"}:
-        return "Warm signal", "The last available call contains a goal, product question or agreed next step."
-    return "Unclassified", "The last available call does not support a clear buying-temperature label."
+        return "Warm signal", "The last live conversation contains a goal, product question or agreed next step."
+    return "Unclassified", "The last live conversation does not support a clear buying-temperature label."
 
 
 def cost_summary(store, calls):
@@ -229,8 +238,15 @@ def export_tables(store):
             call_rows.append(record)
         # Do not infer that a later objection in the same category resolves an earlier concern.
         open_objections = [(o, cid) for o, cid in objections if o["resolution"] != "resolved"]
-        latest_result = analyses.get(group[-1]["call_id"])
-        next_action = latest_result["extraction"]["next_action"] if latest_result else "Finish reviewing the available calls."
+        if len(lead_analyses) != len(group):
+            next_action = "Finish reviewing the available calls."
+        elif (live := last_conversation(group, lead_analyses)) is None:
+            next_action = ("No call reached the lead. Confirm the phone number and try another channel such as "
+                           "WhatsApp or email before further calls.")
+        else:
+            unanswered = len(group) - 1 - group.index(live)
+            next_action = (f"The last {unanswered} call(s) reached voicemail or no conversation. From the last live "
+                           f"conversation: " if unanswered else "") + lead_analyses[live["call_id"]]["extraction"]["next_action"]
         if priority == "Verify enrollment":
             next_action = "Confirm enrollment/payment and current lead status before any further sales outreach. " + next_action
         elif priority == "Do not contact":

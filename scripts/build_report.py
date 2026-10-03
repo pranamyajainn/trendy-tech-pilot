@@ -169,7 +169,8 @@ def build(root):
              "Script adherence is unavailable because the approved script was not supplied.")
 
     complete = [w for w in worklist if w["calls_analysed"] == w["calls_in_export"]]
-    rank = {"Do not contact": 0, "Hot signal": 1, "Warm signal": 2, "Cold signal": 3, "Service follow-up": 4}
+    rank = {"Do not contact": 0, "Hot signal": 1, "Warm signal": 2, "Cold signal": 3, "No live conversation": 4,
+            "Service follow-up": 5}
     chosen = sorted(complete, key=lambda w: (rank.get(w["priority"], 5), w["lead_alias"]))[:5]
     doc.add_page_break()
     para("Lead worklist", "Heading 1")

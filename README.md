@@ -83,7 +83,8 @@ extraction fingerprint and the method freeze, so changing them makes earlier out
 
 Missing extraction is distinct from no objection. Blank CRM conversion flags remain unknown. Yes flags are
 unverified; no conversion rate or probability is inferred. Worklist temperature is a transparent rule based
-on the last available call, not a trained score. CRM-reported enrollment and do-not-contact signals override
+on the last call that reached a person (voicemail is skipped), not a trained score. Journeys where no call
+reached a person are labelled "No live conversation". CRM-reported enrollment and do-not-contact signals override
 sales-priority labels. All outputs require human review before sales use.
 Historical concerns are retained per call: a later concern in the same category does not silently resolve
 an earlier one. Cross-call resolution requires review. Superseded model/prompt artifacts are excluded.

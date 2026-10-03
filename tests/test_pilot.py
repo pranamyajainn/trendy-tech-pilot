@@ -135,6 +135,22 @@ def test_latest_call_controls_temperature_not_earlier_interest():
     assert priority_for(calls, data)[0] == "Cold signal"
 
 
+def voicemail():
+    return {"extraction": {"conversation_type": "unusable", "signals": []}}
+
+
+def test_trailing_voicemail_does_not_hide_the_last_live_conversation():
+    calls = [call(), call(number=1), call(number=2)]
+    data = {calls[0]["call_id"]: analysis(["payment_intent"]), calls[1]["call_id"]: voicemail(),
+            calls[2]["call_id"]: voicemail()}
+    assert priority_for(calls, data)[0] == "Hot signal"
+
+
+def test_journey_that_never_reached_a_person_is_labelled_separately():
+    calls = [call(), call(number=1)]
+    assert priority_for(calls, {c["call_id"]: voicemail() for c in calls})[0] == "No live conversation"
+
+
 def test_incomplete_journey_does_not_get_hot_label():
     calls = [call(), call(number=1)]
     assert priority_for(calls, {calls[1]["call_id"]: analysis(["payment_intent"])})[0] == "Needs review"
