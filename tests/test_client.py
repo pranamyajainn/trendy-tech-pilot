@@ -58,7 +58,7 @@ def test_client_sheets_put_actionable_leads_first_and_stay_drafts_until_validate
     from trendytech_pilot.storage import read_json
     rows = read_json(store.path("exports", "client", "lead_actions.json"))
     assert [r["action_category"] for r in rows] == ["Resolve a purchase condition", "Confirm enrollment"]
-    assert result["review_draft"] is True and "1:15" in rows[0]["supporting_evidence"]
+    assert result["review_draft"] is True and "1 May 2026 at 1:15" in rows[0]["supporting_evidence"]
 
 
 def test_validation_needs_every_client_claim_signed_and_a_full_audit_sample(tmp_path):
@@ -102,6 +102,7 @@ def test_enrolled_learners_are_routed_to_support_unless_a_sale_followed(tmp_path
                              "C21": artifact("learner_support"), "C22": artifact("sales"), "C31": artifact("sales")})
     leads = journeys(Store(tmp_path), calls)
     assert leads["1"]["forced_category"] == "Route to learner support"
+    assert "learner support call on 2 May 2026" in leads["1"]["basis"]
     assert leads["2"]["forced_category"] == "Confirm enrollment"  # a sales conversation came after support
     assert leads["3"]["forced_category"] == "Confirm enrollment"
 

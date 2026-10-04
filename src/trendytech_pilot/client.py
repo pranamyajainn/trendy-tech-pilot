@@ -55,14 +55,15 @@ Rules:
   comparison, confirm interest, route a request), not "follow up".
 - suggested_wording: a natural opening question the salesperson can use, tailored to this lead.
 - timing_status_check: the agreed date if one exists, written as history, plus what to reconfirm first.
-- evidence: one to three call_id and segment_id references from the history that support the action.
+- evidence: up to three call_id and segment_id references shown in square brackets in the history that
+  support the action. Cite none rather than a reference that is not shown.
 - Never invent offers, prices, discounts, approvals, course features or actions already taken. If the
   salesperson must fill in a detail, write a placeholder in brackets, such as [approved fee].
 - Plain language for a sales manager. No technical labels, probabilities, scores, or hot/warm/cold labels.
   Never write call IDs, segment numbers or underscored labels in the text; refer to calls by date.
   Never write the prospect's or an agent's name: say "the prospect" or "the learner" and use they/them.
 Return JSON only."""
-PROMPT_VERSION = "lead-action-v3"
+PROMPT_VERSION = "lead-action-v4"
 
 
 SUPPORT_TYPES = ("learner_support", "administrative")
@@ -83,8 +84,12 @@ def journeys(store, calls):
             history.append({"call": call, "artifact": artifact, "extraction": artifact["extraction"]})
         live = [h for h in history if h["extraction"]["conversation_type"] != "unusable"]
         signals = {s["kind"] for h in history for s in h["extraction"]["signals"]}
+        day = lambda h: human_date(h["call"]["created_on"])
+        basis = None  # The fact behind a rule-fixed category, shown with the evidence.
         if "do_not_contact" in signals:
             rule = "Review contact details or contact preferences"
+            basis = "The prospect asked not to be contacted on " + day(next(
+                h for h in history if any(s["kind"] == "do_not_contact" for s in h["extraction"]["signals"]))) + "."
         elif any(c["crm_conversion_flag"] == "Yes" for c in group):
             # Calls that show an enrolled learner (support or onboarding, with no sales conversation after it)
             # already answer the enrollment question; the sales team's action is the handover.
@@ -92,17 +97,29 @@ def journeys(store, calls):
             sales_after = support and any(h["extraction"]["conversation_type"] in ("sales", "enrollment_or_payment")
                                           for h in history[support[-1] + 1:])
             rule = "Route to learner support" if support and not sales_after else "Confirm enrollment"
+            basis = ("The CRM marks this lead as enrolled (not independently checked)"
+                     + (f"; the learner support call on {day(history[support[-1]])} shows them studying." if
+                        rule == "Route to learner support" else "."))
         elif not live:
             rule = "Review contact details or contact preferences"
+            basis = f"None of the {len(history)} recorded calls reached a conversation."
         elif live[-1]["extraction"]["conversation_type"] in SUPPORT_TYPES:
             rule = "Route to learner support"
+            basis = f"The latest conversation, on {day(live[-1])}, was a learner support call."
         else:
             rule = None
         out[lead] = {"lead_number": lead, "lead_alias": group[0]["lead_alias"], "owner": group[-1]["current_owner"],
-                     "history": history, "last_live": live[-1] if live else None, "forced_category": rule,
+                     "history": history, "last_live": live[-1] if live else None, "forced_category": rule, "basis": basis,
                      "unanswered_after_last_live": len(history) - 1 - history.index(live[-1]) if live else len(history),
                      "do_not_contact": "do_not_contact" in signals}
     return out
+
+
+def human_date(created_on):
+    return f"{int(created_on[8:10])} {MONTHS[int(created_on[5:7]) - 1]} {created_on[:4]}"
+
+
+MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
 
 def history_text(store, journey):
@@ -110,7 +127,9 @@ def history_text(store, journey):
     lines = []
     for h in journey["history"]:
         call, x = h["call"], h["extraction"]
-        lines.append(f"\nCall {call['call_id']} on {call['created_on'][:10]} ({x['conversation_type']}): {x['summary']}")
+        quotable = any(x[collection] for collection in ("facts", "signals", "objections", "pitches"))
+        lines.append(f"\nCall {call['call_id']} on {call['created_on'][:10]} ({x['conversation_type']}): {x['summary']}"
+                     + ("" if quotable else " (no verified quotes in this call; do not cite it)"))
         for collection in ("facts", "signals", "objections", "pitches"):
             for item in x[collection]:
                 ev = item["evidence"]
@@ -177,7 +196,7 @@ def lead_action(store, journey, model, force=False):
             feedback = f"\nYour previous answer was invalid: {str(exc)[:300]}. Cite only references shown in the history."
     last_live = journey["last_live"]
     result = {"fingerprint": fingerprint, "lead_alias": journey["lead_alias"], "lead_number": journey["lead_number"],
-              "owner": journey["owner"], "action": action.model_dump(), "evidence": evidence,
+              "owner": journey["owner"], "action": action.model_dump(), "basis": journey["basis"], "evidence": evidence,
               "last_live_conversation": last_live["call"]["created_on"][:10] if last_live else None,
               "last_call": last_call, "calls_in_export": len(journey["history"]), **usage}
     write_json(path, result)
@@ -272,10 +291,6 @@ INTERNAL_TEXT = re.compile(r"gemini|whisper|sarvam|saaras|fingerprint|h[eo]ld[- 
                            r"|\bC[0-9a-f]{16}\b|https?://|\b[a-z]+_[a-z_]+\b", re.IGNORECASE)
 
 
-def cite(e):
-    return f"Lead {e['lead_number']}, {e['date']} at {e['timestamp']}: “{e['quote']}”"
-
-
 def export_client(store):
     """Assemble the two client sheets from reviewed insight text and generated lead actions."""
     from .quality import validation_status
@@ -288,12 +303,13 @@ def export_client(store):
         x = a["action"]
         rows.append({"lead_identifier": a["lead_number"], "assigned_owner": a["owner"],
                      "action_category": x["action_category"],
-                     "last_substantive_conversation": a["last_live_conversation"] or "No live conversation recorded",
+                     "last_substantive_conversation": (human_date(a["last_live_conversation"]) if a["last_live_conversation"]
+                                                       else "No live conversation recorded"),
                      "goal_and_context": x["goal_and_context"], "latest_position": x["latest_position"],
                      "recommended_next_action": x["recommended_next_action"], "suggested_wording": x["suggested_wording"],
                      "timing_status_check": x["timing_status_check"],
-                     "supporting_evidence": "\n".join(f"{e['date']} at {e['timestamp']}: “{e['quote']}”"
-                                                      for e in a["evidence"])})
+                     "supporting_evidence": "\n".join(([a["basis"]] if a.get("basis") else []) + [
+                         f"{human_date(e['date'])} at {e['timestamp']}: “{e['quote']}”" for e in a["evidence"]])})
     insights = [{k: insight[k] for k in INSIGHT_COLUMNS} for insight in insights]
     for row in insights + rows:
         for key, value in row.items():
