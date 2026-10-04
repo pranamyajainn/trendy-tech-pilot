@@ -319,6 +319,15 @@ def export_client(store):
     insights_path = store.path("review", "sales-insights.json")
     insights = read_json(insights_path)["insights"] if insights_path.exists() else []
     actions = [read_json(p) for p in sorted(store.path("review", "lead-actions").glob("*.json"))]
+    # Reviewer corrections, kept beside the drafts: {lead_alias: {field: text, "reason": why}}.
+    edits_path = store.path("review", "lead-action-edits.json")
+    edits = read_json(edits_path) if edits_path.exists() else {}
+    for a in actions:
+        for field, text in edits.get(a["lead_alias"], {}).items():
+            if field != "reason":
+                if field not in LeadAction.model_fields or field in ("action_category", "evidence"):
+                    raise ValueError(f"Edit for {a['lead_alias']} names an unknown or fixed field: {field}")
+                a["action"][field] = text
     rows = []
     for a in sorted(actions, key=lambda a: (ACTION_ORDER[a["action"]["action_category"]], a["lead_alias"])):
         x = a["action"]

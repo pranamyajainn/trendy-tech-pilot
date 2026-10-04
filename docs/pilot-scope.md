@@ -56,8 +56,8 @@ automation, calibrated lead probabilities, and controlled conversion-lift experi
 
 - [x] 300 downloaded audio files validated with ffprobe, with source manifest and checksums
 - [x] Method v2 developed and reviewed on the 238 development calls, then frozen (4 Oct 2026)
-- [ ] 300 consensus transcripts and verified extractions, including the 62 held-out calls
-- [ ] 5–8 sales findings and one next action per lead, each traceable to a call and time
-- [ ] Client workbook and report (review drafts), internal workbook with costs and review queue
+- [x] 300 consensus transcripts and verified extractions, including the 62 held-out calls (4 Oct 2026)
+- [x] 7 sales findings and one next action per lead, each traceable to a call and time
+- [x] Client workbook and report (review drafts), internal workbook with costs and review queue
 - [ ] Human validation pack signed: every client statement and a 100-claim held-out audit sample
 - [x] Actual runtime and API cost ledger; labour, hardware and setup costs recorded as unmeasured

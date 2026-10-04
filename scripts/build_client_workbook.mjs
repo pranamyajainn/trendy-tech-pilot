@@ -38,7 +38,12 @@ function sheet(name, title, rows, columns) {
   if (rows.length) {
     const table = ws.tables.add(`A4:${col(keys.length - 1)}${matrix.length + 3}`, true, name.replace(/[^A-Za-z]/g, '') + 'Table');
     table.style = 'TableStyleLight1';
-    ws.getRangeByIndexes(4, 0, rows.length, keys.length).format.autofitRows();
+    // Explicit heights from the longest wrapped cell: autofit undersizes some rows, which clips the last line.
+    rows.forEach((row, r) => {
+      const lines = Math.max(...columns.map(c => String(row[c.key] ?? '').split('\n')
+        .reduce((n, part) => n + Math.max(1, Math.ceil(part.length / (c.width * 1.05))), 0)));
+      ws.getRangeByIndexes(4 + r, 0, 1, keys.length).format.rowHeight = lines * 13.5 + 8;
+    });
   }
   ws.freezePanes.freezeRows(4);
 }

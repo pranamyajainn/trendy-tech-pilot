@@ -29,7 +29,9 @@ proves accuracy.
 with `reviewer` and `reviewed_at`. Unsigned rows are not counted.
 
 1. `data/qa/validate-client-claims.csv`: every statement the client sheets rely on (finding examples and each
-   lead's supporting evidence). Set `verdict` to Confirmed, Corrected (and fix the client text) or Removed.
+   lead's supporting evidence). Set `verdict` to Confirmed, Corrected or Removed. Corrections to a lead action go
+   in `data/review/lead-action-edits.json` (field, new text and reason), which `pilot client` applies; finding
+   text lives in `data/review/sales-insights.json`.
 2. `data/qa/audit-claims-sample.csv`: a seeded random sample of up to 100 extracted claims from the held-out
    calls, which were never used to tune the method. Set `correct` to yes or no and note the problem.
 

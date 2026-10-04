@@ -124,3 +124,18 @@ def test_a_plain_decline_goes_to_contact_preferences_but_a_decline_with_a_concer
     leads = journeys(Store(tmp_path), [call("1", 1), call("2", 1)])
     assert leads["1"]["forced_category"] == "Review contact details or contact preferences"
     assert "not interested" in leads["1"]["basis"] and leads["2"]["forced_category"] is None
+
+
+def test_reviewer_edits_replace_drafted_text_but_not_the_category(tmp_path):
+    store = Store(tmp_path)
+    write_json(store.path("review", "lead-actions", "L1.json"), {
+        "lead_alias": "L1", "lead_number": "1", "owner": "Owner", "last_live_conversation": None, "evidence": [],
+        "action": {"action_category": "Answer a specific concern", "goal_and_context": "", "latest_position": "p",
+                   "recommended_next_action": "a", "suggested_wording": "invented offer", "timing_status_check": "t"}})
+    write_json(store.path("review", "lead-action-edits.json"), {"L1": {"suggested_wording": "fixed", "reason": "r"}})
+    export_client(store)
+    from trendytech_pilot.storage import read_json
+    assert read_json(store.path("exports", "client", "lead_actions.json"))[0]["suggested_wording"] == "fixed"
+    write_json(store.path("review", "lead-action-edits.json"), {"L1": {"action_category": "Confirm enrollment"}})
+    with pytest.raises(ValueError, match="fixed field"):
+        export_client(store)
