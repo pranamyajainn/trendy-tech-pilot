@@ -94,3 +94,23 @@ def test_client_export_keeps_only_sheet_columns_and_refuses_internal_detail(tmp_
         write_json(store.path("review", "sales-insights.json"), {"insights": [{**insight, "sales_implication": leak}]})
         with pytest.raises(ValueError, match="internal detail"):
             export_client(store)
+
+
+def test_enrolled_learners_are_routed_to_support_unless_a_sale_followed(tmp_path, fake_extractions):
+    calls = [call("1", 1, "Yes"), call("1", 2, "Yes"), call("2", 1, "Yes"), call("2", 2, "Yes"), call("3", 1, "Yes")]
+    fake_extractions.update({"C11": artifact("sales"), "C12": artifact("learner_support"),
+                             "C21": artifact("learner_support"), "C22": artifact("sales"), "C31": artifact("sales")})
+    leads = journeys(Store(tmp_path), calls)
+    assert leads["1"]["forced_category"] == "Route to learner support"
+    assert leads["2"]["forced_category"] == "Confirm enrollment"  # a sales conversation came after support
+    assert leads["3"]["forced_category"] == "Confirm enrollment"
+
+
+def test_drafted_actions_must_not_name_the_lead_or_agent(tmp_path, fake_extractions):
+    fake_extractions["C11"] = artifact("sales")
+    journey = journeys(Store(tmp_path), [{**call("1", 1), "lead_name": "Asha Verma", "salesperson": "Ravi K"}])["1"]
+    text = {"goal_and_context": "", "latest_position": "Asha asked about fees.", "recommended_next_action": "a",
+            "suggested_wording": "Hi, calling from TrendyTech", "timing_status_check": "t", "evidence": []}
+    assert client.names_in(journey, client.LeadAction(action_category=client.CATEGORIES[0], **text)) == {"Asha"}
+    clean = {**text, "latest_position": "The prospect asked about fees."}
+    assert not client.names_in(journey, client.LeadAction(action_category=client.CATEGORIES[0], **clean))

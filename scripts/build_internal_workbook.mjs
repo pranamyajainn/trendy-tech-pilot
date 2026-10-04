@@ -9,6 +9,12 @@ const read = async name => JSON.parse(await fs.readFile(path.join(root, 'exports
 const [overview, worklist, calls, evidence, profiles, objectionSummary, signalSummary, reviewQueue] = await Promise.all(
   ['overview', 'worklist', 'calls', 'evidence', 'profiles', 'objection_summary', 'signal_summary', 'review_queue'].map(read)
 );
+const clientMeta = JSON.parse(await fs.readFile(path.join(root, 'exports', 'client', 'meta.json'), 'utf8'));
+const v = clientMeta.validation;
+const validation = v.complete
+  ? `Complete: ${v.client_claims} client statements signed; audit precision ${(v.audit_precision * 100).toFixed(0)}% of ${v.audit_reviewed} (95% interval ${v.audit_precision_95ci.map(x => (x * 100).toFixed(0) + '%').join(' to ')})`
+  : `Pending: ${v.client_claims_reviewed} of ${v.client_claims} client statements and ${v.audit_reviewed} of ${v.audit_sample} audit claims reviewed. Client files stay labelled Review draft.`;
+const methodCost = await fs.readFile(path.join(root, 'review', 'method-cost.json'), 'utf8').then(JSON.parse, () => null);
 const workbook = Workbook.create();
 const safe = value => {
   if (value == null) return '';
@@ -52,18 +58,20 @@ function table(name, rows, keys, widths = {}) {
 const counts = [
   {item: 'Selected calls', value: overview.selected_calls},
   {item: 'Selected leads', value: overview.selected_leads},
-  {item: 'Calls with evidence-checked extraction', value: overview.analysed_calls},
+  {item: 'Calls with verified extraction', value: overview.analysed_calls},
   {item: 'Journeys with all available calls extracted', value: overview.complete_extracted_journeys},
   {item: 'Held-out leads', value: overview.holdout_leads},
   {item: 'Unique transcribed audio minutes', value: Math.round(overview.costs.unique_transcribed_audio_minutes)},
   {item: 'Measured external API spend (INR)', value: Number(overview.costs.external_api_spend_inr.toFixed(2))},
   {item: 'External API cost per audio minute (INR)', value: overview.costs.external_api_inr_per_audio_minute == null ? 'Unmeasured' : Number(overview.costs.external_api_inr_per_audio_minute.toFixed(2))},
   {item: 'Full processing cost per minute (INR)', value: overview.costs.processing_inr_per_audio_minute ?? 'Unmeasured'},
-  {item: 'Accuracy status', value: overview.accuracy_status},
+  {item: 'Final method API cost per audio minute (INR)', value: methodCost ? `${methodCost.inr_per_audio_minute} on one clean pass (${Object.entries(methodCost.stages_inr).map(([k, x]) => k.replaceAll('_', ' ') + ' ' + x).join(', ')}); proposal ceiling ${methodCost.proposal_ceiling_inr_per_minute}` : 'Unmeasured'},
+  {item: 'Human validation', value: validation},
   {item: 'Worklist use', value: 'Retrospective suggestions as of last exported call. Confirm current status before outreach.'},
   {item: 'Sampling', value: '50 multi-call leads selected to give 300 calls. Findings do not estimate archive conversion.'},
   {item: 'Outcomes', value: 'CRM Yes flags unverified; blanks unknown. No conversion probabilities.'},
-  {item: 'Quality', value: 'Exact-quote checks are automated. Meaning, speaker attribution and transcription need independent review.'},
+  {item: 'Method', value: 'v2: Whisper, Gemini and Sarvam transcripts vote per segment; three-way disputes resolved against the audio. Gemini 3.8 Flash extracts; Gemini 3.5 Flash verifies every claim. Unsupported claims are in the Review queue, not in client files.'},
+  {item: 'Quality', value: 'Model agreement and quote checks are automated, not proof of accuracy. Only the signed validation pack measures it.'},
   {item: 'Rubric', value: 'Call-quality columns show provisional evidence coverage, not approved performance scores. Script adherence unavailable.'},
 ];
 table('Pilot readout', counts, ['item', 'value'], {item: 46, value: 105});
