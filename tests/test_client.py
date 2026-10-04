@@ -115,3 +115,12 @@ def test_drafted_actions_must_not_name_the_lead_or_agent(tmp_path, fake_extracti
     assert client.names_in(journey, client.LeadAction(action_category=client.CATEGORIES[0], **text)) == {"Asha"}
     clean = {**text, "latest_position": "The prospect asked about fees."}
     assert not client.names_in(journey, client.LeadAction(action_category=client.CATEGORIES[0], **clean))
+
+
+def test_a_plain_decline_goes_to_contact_preferences_but_a_decline_with_a_concern_does_not(tmp_path, fake_extractions):
+    fake_extractions.update({"C11": artifact("sales", [{"kind": "low_interest"}]),
+                             "C21": {"extraction": {**artifact("sales", [{"kind": "low_interest"}])["extraction"],
+                                                    "objections": [{"category": "format"}]}}})
+    leads = journeys(Store(tmp_path), [call("1", 1), call("2", 1)])
+    assert leads["1"]["forced_category"] == "Review contact details or contact preferences"
+    assert "not interested" in leads["1"]["basis"] and leads["2"]["forced_category"] is None

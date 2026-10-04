@@ -72,7 +72,7 @@ def build(root):
     para(f"We reviewed 300 recorded calls across 50 leads from the September 2026 call export to answer two "
          f"questions: what should change in the sales approach, and what should happen next with each lead. "
          f"This report gives {len(insights)} findings and a recommended next action for each of the "
-         f"{len(actions)} leads. Every finding and action points to the call and moment it came from.")
+         f"{len(actions)} leads. Every finding and action shows the calls, and the moments in them, that it rests on.")
 
     para("What should change in the sales approach", "Heading 1")
     for index, insight in enumerate(insights, 1):
@@ -96,9 +96,13 @@ def build(root):
         para(action["recommended_next_action"], bold_prefix="Next action: ")
         para(action["suggested_wording"], bold_prefix="Opening question: ")
 
-    para("How to trace any statement", "Heading 1")
-    para("Each finding and action gives a lead number, call date and time into the recording. Open that call in "
-         "the CRM recording and go to the time shown to hear the original words.")
+    para("How this review was done", "Heading 1")
+    para("Each recording was transcribed by three independent speech-recognition systems. Where they disagreed, the "
+         "passage was checked against the audio. Statements were then taken from the transcript, and each one was "
+         "checked a second time against the words that support it; statements that could not be supported were left "
+         "out. Counts in the findings are of leads and calls in this sample.")
+    para("To trace any statement, open the call in the CRM recording for the lead and date shown, and go to the time "
+         "given to hear the original words.")
     para("Limits of this review", "Heading 1")
     for text in [("The calls are a selected sample of leads with several recorded calls, so counts describe this "
                   "sample, not every TrendyTech lead."),
