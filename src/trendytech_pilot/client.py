@@ -1,11 +1,12 @@
 """Client-facing lead actions: one row per lead, built from the whole verified journey.
 
-Facts that decide the action (last live conversation, CRM flag, unanswered calls) are computed here; Gemini Pro
-only drafts wording from verified claims and quotes, and every evidence reference it gives is checked and then
+Facts that decide the action (last live conversation, CRM flag, unanswered calls) are computed here; the model
+(the verifier, Gemini 3.5 Flash) only drafts wording from verified claims and quotes, and every evidence reference it gives is checked and then
 rendered from the transcript by this code.
 """
 
 import json
+import re
 from collections import defaultdict
 from typing import Literal
 
@@ -239,6 +240,11 @@ def insight_metrics(store, calls):
 
 ACTION_ORDER = {c: i for i, c in enumerate(CATEGORIES)}
 SCOPE_NOTE = "Findings describe the selected historical calls. Confirm each lead's current position before outreach."
+INSIGHT_COLUMNS = ("finding", "evidence_and_scale", "sales_implication", "recommended_change", "suggested_wording",
+                   "how_to_assess", "source")
+# Client sheets carry no processing details: system names, call IDs, links, split labels or snake_case field names.
+INTERNAL_TEXT = re.compile(r"gemini|whisper|sarvam|saaras|fingerprint|h[eo]ld[- ]?out|development (?:split|calls?)"
+                           r"|\bC[0-9a-f]{16}\b|https?://|\b[a-z]+_[a-z_]+\b", re.IGNORECASE)
 
 
 def cite(e):
@@ -263,6 +269,11 @@ def export_client(store):
                      "timing_status_check": x["timing_status_check"],
                      "supporting_evidence": "\n".join(f"{e['date']} at {e['timestamp']}: “{e['quote']}”"
                                                       for e in a["evidence"])})
+    insights = [{k: insight[k] for k in INSIGHT_COLUMNS} for insight in insights]
+    for row in insights + rows:
+        for key, value in row.items():
+            if match := INTERNAL_TEXT.search(str(value)):
+                raise ValueError(f"Client text contains internal detail {match.group()!r} in {key}; fix the source text")
     status = validation_status(store)
     write_json(store.path("exports", "client", "meta.json"),
                {"scope_note": SCOPE_NOTE, "review_draft": not status["complete"], "validation": status})

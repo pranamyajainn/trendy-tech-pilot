@@ -78,3 +78,19 @@ def test_wilson_interval_handles_perfect_scores_without_claiming_certainty():
     low, high = wilson_interval(50, 50)
     assert high == 1.0 and low < 0.95
     assert wilson_interval(0, 0) is None
+
+
+def test_client_export_keeps_only_sheet_columns_and_refuses_internal_detail(tmp_path):
+    store = Store(tmp_path)
+    insight = {"finding": "f", "evidence_and_scale": "4 of 9 leads", "sales_implication": "i", "recommended_change": "c",
+               "suggested_wording": "w", "how_to_assess": "a", "source": "Lead 1, 2026-05-01 at 1:15",
+               "examples": [{"call_id": "C0123456789abcdef", "recording_url": "https://example.invalid/1"}]}
+    write_json(store.path("review", "sales-insights.json"), {"insights": [insight]})
+    export_client(store)
+    from trendytech_pilot.storage import read_json
+    [row] = read_json(store.path("exports", "client", "sales_insights.json"))
+    assert list(row) == list(client.INSIGHT_COLUMNS)
+    for leak in ["Checked by Gemini", "see C0123456789abcdef", "price_question", "held-out calls"]:
+        write_json(store.path("review", "sales-insights.json"), {"insights": [{**insight, "sales_implication": leak}]})
+        with pytest.raises(ValueError, match="internal detail"):
+            export_client(store)

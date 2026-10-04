@@ -3,8 +3,11 @@
 Authority: client proposal SAI-Q-2026-013, 28 September 2026, pages 3–4.
 The customer authorised starting the pilot on 1 October 2026 and initially chose local models.
 On 3 October 2026 the customer confirmed that local, open-source or paid hosted models may be used.
-Local extraction failed development review, so text extraction moved to Gemini on a paid account within
-the INR 500 project cap. Audio transcription stays local.
+Local extraction failed development review, so extraction moved to hosted models. The owner then asked for
+the most accurate output rather than the cheapest: method v2 cross-checks three transcripts (local Whisper,
+Gemini, Sarvam) and verifies every extracted claim with a second model, within an INR 4,000 API ceiling.
+On 3 October 2026 the client asked for a two-sheet client workbook (Sales Insights, Lead Actions) with no
+costs, model names or technical labels; costs, logs and QA moved to a separate internal workbook.
 The signed proposal file, recordings and client workbook remain outside Git history.
 
 ## Commitments
@@ -52,8 +55,9 @@ automation, calibrated lead probabilities, and controlled conversion-lift experi
 ## Delivery checklist
 
 - [x] 300 downloaded audio files validated with ffprobe, with source manifest and checksums
-- [x] 300 timestamped transcripts and evidence-validated call extractions (frozen method; 3 Oct 2026)
-- [x] 50 export-complete lead journeys and a mini worklist
-- [x] Structured Excel workbook and plain-language findings report (review copies; accuracy pending)
-- [ ] Held-out QA references reviewed and accuracy measured (templates ready; needs a human reviewer)
+- [x] Method v2 developed and reviewed on the 238 development calls, then frozen (4 Oct 2026)
+- [ ] 300 consensus transcripts and verified extractions, including the 62 held-out calls
+- [ ] 5–8 sales findings and one next action per lead, each traceable to a call and time
+- [ ] Client workbook and report (review drafts), internal workbook with costs and review queue
+- [ ] Human validation pack signed: every client statement and a 100-claim held-out audit sample
 - [x] Actual runtime and API cost ledger; labour, hardware and setup costs recorded as unmeasured

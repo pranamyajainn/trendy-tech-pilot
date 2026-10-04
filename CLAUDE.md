@@ -1,9 +1,9 @@
 # TrendyTech call-extraction pilot
 
-Local Python CLI (Apple-silicon MLX for audio, Gemini for text extraction) that turns a client CRM call export
-and recordings into evidence-linked extractions, lead-journey worklists, an Excel workbook and a Word report for
-a ~300-call / 50-lead paid pilot (proposal SAI-Q-2026-013). Scope: docs/pilot-scope.md. QA: docs/qa-protocol.md.
-History: PROJECT_HANDOFF.md (a 3 Oct 2026 snapshot written by a previous agent; verify claims against code/data).
+Python CLI that turns a client CRM call export and recordings into evidence-linked, model-verified call
+extractions, per-lead next actions, a two-sheet client workbook, an internal workbook and a Word report for a
+~300-call / 50-lead paid pilot (proposal SAI-Q-2026-013). Scope: docs/pilot-scope.md. QA: docs/qa-protocol.md.
+Method history: docs/local-evaluation.md. PROJECT_HANDOFF.md is an untracked 3 Oct 2026 snapshot; verify it.
 
 ## Hard rules
 - PUBLIC repo. Everything under data/ is private customer data. Never git-add data/, audio, xlsx, docx, pdf,
@@ -15,48 +15,59 @@ History: PROJECT_HANDOFF.md (a 3 Oct 2026 snapshot written by a previous agent; 
   get around a guard or the API budget.
 - Holdout (10 leads / 62 calls) stays untouched until `pilot freeze`. Never tune on holdout output.
 - Experiments write only to data/experiments/. Never copy experiment output into data/extractions/.
-- Paid API: Gemini only, project cap INR 500 enforced in remote.py. Raising it needs an explicit owner decision.
-  Google account credit is not budget approval.
-- No new model downloads without approval. Use HF_HUB_OFFLINE=1. Never run ASR and a large local LLM at once.
-- Never claim accuracy, conversion prediction or a passed cost gate. Quote matching is not correctness.
+- Paid APIs: Gemini and Sarvam only, one shared ceiling MAX_CAP_INR in budget.py (INR 4,000; owner decisions
+  are recorded there). Raising it needs an explicit owner decision. Provider credit is not budget approval.
+- Client outputs (exports/client, the client workbook and report) never show costs, model names, API usage,
+  fingerprints, dev/holdout labels or internal field names. Those belong in the internal workbook only.
+- Never claim accuracy, conversion prediction or a passed cost gate. Model agreement and quote matching are
+  not correctness; only the human validation pack (docs/qa-protocol.md) can lift the "Review draft" label.
 - No dashboards, servers, databases, schedulers or trained scoring models: out of pilot scope.
 
 ## Commands
 - State:    .venv/bin/pilot status
 - Tests:    .venv/bin/pytest -q
 - Lint:     .venv/bin/ruff check src tests scripts/*.py
-- Pipeline: .venv/bin/pilot {audit <xlsx>|select|download|transcribe|extract|freeze|export|qa}
-            (--split development|holdout|all; --limit N takes the first N, not a sample; --force)
-- Gemini:   export PILOT_EXTRACTOR=gemini PILOT_ALLOW_REMOTE=1 HF_HUB_OFFLINE=1 before extract/freeze/holdout
-            commands (the .env defaults stay local/off). Keep the same env for freeze and holdout runs.
-- Trial:    PILOT_ALLOW_REMOTE=1 .venv/bin/python scripts/calibrate_remote.py CALL_ID ... (development only)
-- Outputs:  .venv/bin/pilot export, then
-            ~/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node scripts/export_workbook.mjs
+- Remote:   export PILOT_EXTRACTOR=verified PILOT_ALLOW_REMOTE=1 HF_HUB_OFFLINE=1 for every stage below
+            (.env defaults stay local/off). Keep the same env for freeze and holdout runs.
+- Pipeline: .venv/bin/pilot {download|transcribe|cross-transcribe|sarvam-transcribe|resolve|extract}
+            (--split development|holdout|all; --calls ID,ID; --limit N takes the first N; --force)
+            then pilot freeze [--supersede REASON|--retire REASON], export, lead-actions, client, qa.
+- Long runs: wrap in `caffeinate -is`, on mains power with the lid open; a sleeping Mac stalls requests.
+- Outputs:  NODE=~/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node
+            $NODE scripts/build_client_workbook.mjs; $NODE scripts/build_internal_workbook.mjs
             .venv/bin/python scripts/build_report.py
 - Before any push: stage intended files only, run .venv/bin/python scripts/check_public_tree.py,
   git diff --cached --check, and read the staged content.
 
 ## Architecture (src/trendytech_pilot/)
-cli.py (commands, split, freeze) → ingest.py (audit, sampling) → audio.py (download, mlx-whisper)
-→ extract.py (prompt, LocalExtractor, extract_call with retry/quarantine) + remote.py (GeminiExtractor,
-budget reservation + lock, busy retries, provider-safe schema) → schema.py (pydantic + validate_evidence)
-→ artifacts.py (freshness; the single definition of "current") → reporting.py (exports, worklist rules,
-cost) / quality.py (holdout QA). storage.py: atomic write_json, safe_cell CSV escaping, Store.event ledger.
-models.py: pinned local revisions. Experimental, not wired into the CLI: referenced.py, experiments.py,
-scripts/calibrate_*.py.
+Transcripts: audio.py (download, local Whisper large-v3-turbo) + remote_asr.py (Gemini 3.8 Flash verbatim)
++ remote_sarvam.py (Sarvam Saaras v4 batch, diarized) → consensus.py (word alignment) → resolve.py (2-of-3
+vote; only three-way disputes go to an audio-grounded Gemini 3.5 Flash resolver, which also maps Sarvam
+speakers to agent/prospect). Extraction: extract.py (prompt, retries) + remote.py (GeminiExtractor,
+provider-safe schema, busy retries) → ensemble.py (Gemini 3.5 Flash verifies every claim against the
+transcript; unsupported claims go to the review queue) → schema.py (validate_evidence). budget.py: one
+file-locked INR budget for all paid calls. artifacts.py: the single definition of "current" (fingerprints,
+freeze). reporting.py: internal exports and review queue. client.py: lead journeys, lead-action drafting,
+insight metrics, client export, validation pack. quality.py: holdout QA and validation status. cli.py: commands.
+Experimental, not wired into the CLI: referenced.py, experiments.py, scripts/calibrate_*.py.
 
 ## Conventions
 - Python >=3.11, ruff line-length 110. Match the existing dense style; comments explain why.
-- All JSON writes go through storage.write_json. Every download/inference attempt (success, failed,
-  interrupted) gets a Store.event with wall_seconds and external_cost_inr.
-- Extraction identity = transcript + model + revision + PROMPT_VERSION + SYSTEM + generation_config(model).
-  Bump PROMPT_VERSION when SYSTEM changes and ASR_VERSION when ASR behaviour changes; register a new local
-  model's immutable revision in models.py first.
+- All JSON writes go through storage.write_json. Every paid or inference attempt (success, failed,
+  interrupted) gets a Store.event with wall_seconds and external_cost_inr, and a Budget reservation.
+- Any method identity dict (GEMINI_ASR, SARVAM_ASR, RESOLVER, VERIFIED_GENERATION, PROMPT_VERSION,
+  EVIDENCE_RULES_VERSION) is part of a fingerprint: changing it makes stored outputs stale and needs a refreeze.
 - CLI batches isolate per-call failures and exit nonzero; never turn failures into empty successes.
 - Unknown is not zero or negative: blank CRM flags, missing extractions and unmeasured costs stay null.
 
+## Provider limits found (3 Oct 2026)
+- gemini-3.5-transcribe: 100 requests/day; gemini-3.1-pro (shared with gemini-pro-latest): 250/day. Neither
+  is used now. A 429 containing "PerDay" fails fast; 4xx rejections are settled as unbilled.
+- Sarvam keyterms made the model insert product names into unclear audio; they are deliberately not sent.
+
 ## Environment caveats
 - .venv's base interpreter and the workbook runtime (@oai/artifact-tool via the node_modules symlink) live in
-  ~/.cache/codex-runtimes/. Do not delete that cache.
+  ~/.cache/codex-runtimes/. Do not delete that cache. soffice/pdftoppm for render checks are under
+  ~/.cache/codex-runtimes/codex-primary-runtime/dependencies/bin/override/.
 - Audio metadata stores absolute paths: do not move the project folder.
-- ffprobe comes from Homebrew; model weights are in ~/.cache/huggingface/hub (5 pinned snapshots).
+- ffmpeg/ffprobe come from Homebrew; model weights are in ~/.cache/huggingface/hub.

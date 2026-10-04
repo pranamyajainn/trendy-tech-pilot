@@ -1,9 +1,11 @@
-# Local extraction evaluation — status as of 3 October 2026
+# Method evaluation record
 
-The pipeline has all 300 recordings and 238 development transcripts. The remaining 62 calls belong to the
-10 held-out leads. They are not used to tune extraction. No paid API requests have been made.
+This records how the method reached its current form (v2, frozen 4 October 2026). All reviews below used
+the 238 development calls only; the 62 calls of the 10 held-out leads were never used for tuning.
 
-## What has been tested
+## Local extraction (1–2 October 2026)
+
+### What was tested
 
 - Qwen2.5 7B, Qwen3 8B, Qwen3.5 9B and Qwen3.5 27B, quantized for the local Mac.
 - The original full JSON schema with exact quotations and validation retries.
@@ -16,7 +18,7 @@ The scripts `calibrate_references.py` and `calibrate_staged.py` require developm
 to ignored `data/experiments/`. They do not create production extractions, freeze a method, or contact an API.
 Experimental outputs passing reference validation still require meaning and omission review.
 
-## Findings
+### Findings
 
 Segment references remove invented quotations, but cannot make an unsupported interpretation correct.
 The reviewed outputs still confused agent suggestions with prospect facts, missed explicit professional
@@ -33,10 +35,10 @@ These deliberately selected development cases diagnose failure modes. Their pass
 estimate for the 300-call sample. Reference matching is not independent transcription or extraction QA.
 Source text, call identifiers, raw outputs and detailed review notes remain private.
 
-## Hosted extraction (Gemini), 3 October 2026
+## Method v1: hosted extraction (Gemini), 3 October 2026
 
 The owner approved hosted text extraction within an INR 500 cap and the client confirmed any model type may be
-used. Audio transcription stays local. The route uses `gemini-3.8-flash` through Google's OpenAI-compatible endpoint.
+used. Audio transcription stayed local. The route uses `gemini-3.8-flash` through Google's OpenAI-compatible endpoint.
 
 - Integration: the endpoint rejected the strict pydantic schema (HTTP 400). A provider-safe schema is now sent;
   the full schema is still validated locally. Busy 429/503 responses are retried under one budget reservation.
@@ -51,11 +53,40 @@ used. Audio transcription stays local. The route uses `gemini-3.8-flash` through
   borderline short calls.
 - Cost: about INR 0.3 for a short call and INR 1.4 for a 20-minute call at the budgeting rates in `remote.py`.
 
-The method was frozen after this transcript-only development review. It is not an independent accuracy
-measurement; the holdout review provides that. Do not claim the commercial gate has passed or that conversion
-predictions are validated.
+v1 was frozen after this transcript-only review, then retired (history in `data/method-freeze-history/`) when
+the owner asked for cross-checked transcription and verification. Its outputs are kept under `data/superseded/`.
+
+## Method v2: three transcripts and verified extraction, 3–4 October 2026
+
+The owner raised the paid-API ceiling (now INR 4,000, recorded in `budget.py`) and asked for the most accurate
+output rather than the cheapest.
+
+- Transcription: the owner asked for transcription to be cross-checked rather than trusted from one system.
+  Two independent hosted transcripts were added. Gemini's dedicated transcription model allowed only 100
+  requests per day, so Gemini 3.8 Flash transcribes with a plain verbatim instruction; asking it for speaker
+  turns made it repeat sentences. Sarvam Saaras v4 adds an Indian-English specialist with speaker diarization.
+  Sarvam's keyterm list made it insert product names into unclear audio, so no keyterms are sent.
+- Consensus: transcripts are aligned word by word and each Whisper segment takes the 2-of-3 majority. Short
+  texts must match exactly ("fine" is not "five"). Across 11,891 development segments, all three agreed on 65%,
+  two agreed on 24%, and 11% (1,002 spans) went to the resolver, which hears the audio and picks a candidate
+  in shuffled order; code copies the chosen text, so the resolver cannot rewrite it.
+- Speaker roles: the resolver maps Sarvam's speakers to agent or prospect, and extraction prompt
+  `extraction-v9` uses those roles. Roles are not verified separately; the claim verifier rechecks attribution.
+- Verification: a second model checks every claim against the transcript. Planted-error calibration caught
+  30/30 false claims (wrong values, invented payments, relabelled resolutions, agent statements attributed to
+  the prospect) and kept 33/35 genuine claims. On development, 391 claims were verified, 7 lowered or
+  corrected and 15 held for review; 16 call types were corrected.
+- Model choice: Gemini 3.1 Pro was the first resolver and verifier, but its 250 requests/day quota (shared with
+  `gemini-pro-latest`) stopped the run. The owner chose to finish with Flash. Gemini 3.5 Flash judges and
+  verifies, a different model from the 3.8 Flash extractor, so the checker does not grade its own output.
+- Known limits: amounts said in shorthand ("120" for INR 1.2 lakh) are held for review rather than
+  interpreted; occasional category slips remain; 7 speakers stayed unknown.
+
+The development review is transcript-level and done by the builder, so it is not an independent accuracy
+measurement. The human validation pack in [the QA protocol](qa-protocol.md) provides that. Do not claim the
+commercial gate has passed or that conversion predictions are validated.
 
 Generation settings were checked against the official
 [Qwen3.5 model card](https://huggingface.co/Qwen/Qwen3.5-9B#best-practices).
-The Gemini route's rates were rechecked against
-[Google's pricing](https://ai.google.dev/gemini-api/docs/pricing) on 3 October 2026.
+Gemini rates were rechecked against [Google's pricing](https://ai.google.dev/gemini-api/docs/pricing) and Sarvam's
+against its published pricing on 3 October 2026.

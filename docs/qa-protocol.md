@@ -1,61 +1,48 @@
 # Pilot quality protocol
 
 The proposal requests held-out transcription and extraction accuracy, but does not specify a numerical
-acceptance threshold. Do not invent client acceptance or claim that exact-quote matching proves accuracy.
+acceptance threshold. Do not invent client acceptance or claim that model agreement or exact-quote matching
+proves accuracy.
+
+## What the method checks automatically
+
+- Three independent transcripts (Whisper, Gemini, Sarvam) vote per segment; only three-way disagreements go
+  to an audio-grounded resolver. Agreement between systems reduces transcription errors but is not ground truth.
+- Every quote must come from the cited consensus segment (or its boundary neighbour), with fillers ignored.
+- A second model checks every extracted claim against the transcript. Overstated claims are lowered;
+  unsupported claims are held in the review queue and never reach the client sheets.
+- The verifier was calibrated on development calls with deliberately planted false claims
+  (`data/qa/verifier-calibration.json`). That shows it is not rubber-stamping; it does not measure how many real
+  errors remain.
 
 ## Development
 
-1. Inspect recordings from the development leads only. Include short follow-ups, long discovery calls,
-   background noise and learner-support calls. Verify the actual speech against the transcript.
-2. Review extracted field meaning and speaker attribution, not just whether the quote exists.
-3. Confirm that support calls, quoted course fees, module week numbers, and agent questions do not become
-   purchase intent, prospect budget, enrollment deadlines, or prospect profile facts.
-4. Adjust only on development calls. Record failures and the final model/prompt revision. Freeze before
-   opening held-out transcripts. The 10 held-out leads share no lead identifiers with development.
+1. Review development outputs only: transcripts, extracted meaning, speaker roles and the review queue.
+2. Confirm that support calls, quoted course fees, module week numbers and agent questions do not become
+   purchase intent, prospect budget, enrollment deadlines or prospect profile facts.
+3. Adjust only on development calls. Record the review in `data/qa/` and freeze before opening held-out content.
+   The 10 held-out leads share no lead identifiers with development.
 
-## Held-out evaluation
+## Human validation (required before the "Review draft" label is removed)
 
-1. Run the frozen method on the held-out leads without changing it based on their results.
-2. Use `pilot qa` to prepare local reference worksheets. A reviewer listens to each entire recording and
-   writes reference text/fields independently. The reference sheet deliberately hides the ASR hypothesis.
-   Include speech missing from ASR. Set `reviewed_silence=yes` only for a full call with no intelligible speech.
-3. Add reviewer name and review timestamp. Leave genuinely unreviewed rows blank.
-4. Rerun `pilot qa` to measure word error rate and field correctness on signed-off rows, always with review
-   counts/denominators. WER normalizes case and whitespace, retaining punctuation. All-silence review sets
-   report insertion counts and leave WER unavailable because the reference word denominator is zero.
-   Report missing review coverage. Review omitted facts as well as extracted facts.
-5. Check the exact source quote, what it means, and which speaker said it. No diarization is performed by
-   the current mono-ASR route. Ambiguous role attribution requires correction or an unknown value.
-6. Separate generic call-quality evidence coverage from approved script adherence (unavailable).
+`pilot client` writes two reviewer sheets. A reviewer opens each recording at the time shown and signs every row
+with `reviewer` and `reviewed_at`. Unsigned rows are not counted.
 
-Until this is complete, deliverables must say accuracy is not yet independently established. The client
+1. `data/qa/validate-client-claims.csv`: every statement the client sheets rely on (finding examples and each
+   lead's supporting evidence). Set `verdict` to Confirmed, Corrected (and fix the client text) or Removed.
+2. `data/qa/audit-claims-sample.csv`: a seeded random sample of up to 100 extracted claims from the held-out
+   calls, which were never used to tune the method. Set `correct` to yes or no and note the problem.
+
+Validation is complete when every client statement is signed and the whole audit sample is reviewed. The
+client report then states audit precision with its Wilson 95% interval and denominator. This measures whether
+extracted claims are correct, not how much information the method missed; note omissions in `note`.
+
+The older full-call transcription reference sheets (`pilot qa`, word error rate) remain available for a
+deeper transcription audit but are not required for the validation statement.
+
+Until validation is complete, deliverables say accuracy is not yet independently established, and the client
 must not be told that the commercial accuracy gate has passed.
 
-Both model weight revisions and the prompt are frozen. Stale artifacts are excluded from reports and QA.
-Review rows belong to a specific artifact fingerprint; superseded reviews are archived separately.
-An unresolved concern is retained from its source call until a cross-call review confirms it was resolved.
-
-## Current calibration findings
-
-On the first development call, the initial Qwen2.5 7B and Qwen3 8B candidates failed schema/evidence or
-semantic checks. Errors included fabricated/mislocated quotes and treating learner module access as
-purchase intent. These outputs were quarantined, not accepted into the worklist. This is evidence against
-promoting those configurations; it is not an estimated error rate for the whole pilot.
-
-The local Whisper route is running; speed results alone do not establish its transcription accuracy.
-An optional paid extraction fallback is disabled unless the owner opts in and configures a local key.
-
-On 2 October 2026, Qwen3.5 9B and then the 27B 4-bit model were also tested locally. The 27B model
-completed three development calls: two passed schema/quote checks, one failed quote validation twice.
-One of the two technically valid outputs was rejected during transcript-only meaning review because a
-course-completion request was classified as a career goal. The other is a provisional support-call example,
-not an accuracy benchmark. These three support calls do not estimate performance over the whole pilot.
-
-The 27B run recorded about 16.56 GB peak MLX memory and roughly 2.0–2.8 generated tokens per second.
-The first call took 264.8 seconds including prompt processing; one failed call consumed two attempts.
-It fits this machine, but this configuration is not approved for bulk extraction. No paid API requests
-were made during these experiments. Raw outputs and rejection notes are retained only in private data.
-
-Further segment-reference, recommended-sampling and staged trials are documented in
-[the local evaluation record](local-evaluation.md). No extraction configuration has been approved for
-the held-out evaluation yet. All 238 development transcripts are now available.
+Stale artifacts are excluded from reports and QA. Review rows belong to a specific artifact fingerprint;
+superseded reviews are archived separately. An unresolved concern is retained from its source call until a
+later call shows it was resolved.

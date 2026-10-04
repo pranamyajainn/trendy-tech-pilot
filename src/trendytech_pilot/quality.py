@@ -151,7 +151,8 @@ def validation_status(store):
 
     signed = lambda r: r.get("reviewer") and r.get("reviewed_at")
     client = rows("validate-client-claims.csv")
-    audit = [r for r in rows("audit-claims-sample.csv") if signed(r) and r.get("correct", "").strip().lower() in ("yes", "no")]
+    sample = rows("audit-claims-sample.csv")
+    audit = [r for r in sample if signed(r) and r.get("correct", "").strip().lower() in ("yes", "no")]
     correct = sum(r["correct"].strip().lower() == "yes" for r in audit)
     client_signed = [r for r in client if signed(r) and r.get("verdict")]
     return {"client_claims": len(client), "client_claims_reviewed": len(client_signed),
@@ -159,4 +160,6 @@ def validation_status(store):
             "audit_reviewed": len(audit), "audit_correct": correct,
             "audit_precision": correct / len(audit) if audit else None,
             "audit_precision_95ci": wilson_interval(correct, len(audit)),
-            "complete": bool(client) and len(client_signed) == len(client) and len(audit) >= 100}
+            "audit_sample": len(sample),
+            # The sample holds up to 100 claims (fewer only if the held-out calls have fewer); all must be reviewed.
+            "complete": bool(client) and len(client_signed) == len(client) and len(audit) == len(sample) > 0}
