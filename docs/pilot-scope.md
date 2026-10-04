@@ -1,6 +1,7 @@
 # Pilot implementation scope
 
-Authority: client proposal SAI-Q-2026-013, 28 September 2026, pages 3–4.
+Authority: the final client proposal SAI-Q-2026-013 of 2 October 2026, which the client agreed (it supersedes
+the 28 September draft). Where this file and the proposal differ, the proposal wins.
 The customer authorised starting the pilot on 1 October 2026 and initially chose local models.
 On 3 October 2026 the customer confirmed that local, open-source or paid hosted models may be used.
 Local extraction failed development review, so extraction moved to hosted models. The owner then asked for
@@ -16,7 +17,11 @@ The signed proposal file, recordings and client workbook remain outside Git hist
 - Extract stated profile, goals, timing, pitches, responses, objections and handling with supporting transcript evidence.
 - Deliver a structured workbook, a short findings report and a mini worklist with next-call guidance.
 - Benchmark transcription and extraction quality with a held-out sample.
-- Measure processing cost per audio minute, against the proposal's INR 0.60/minute scale-up ceiling.
+- Confirm Phase 1 (the remaining archive of 8,831 calls) can be processed within its INR 35,000 API cost:
+  about INR 1.19 per audio minute for the ~29,300 minutes outside the pilot.
+- Phase 0 proves extraction, cost and accuracy; outcome comparison (converted vs not), hot/warm/cold scoring
+  with an opportunity SWOT per lead, call-quality scoring and best-contact-time analysis are Phase 1 work
+  the pilot should demonstrate on a small scale.
 - Preserve every available call for selected leads. An export-complete journey is not proof of a complete lifetime history.
 
 ## Current instructions and data limitations

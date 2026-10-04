@@ -65,7 +65,7 @@ const counts = [
   {item: 'Measured external API spend (INR)', value: Number(overview.costs.external_api_spend_inr.toFixed(2))},
   {item: 'External API cost per audio minute (INR)', value: overview.costs.external_api_inr_per_audio_minute == null ? 'Unmeasured' : Number(overview.costs.external_api_inr_per_audio_minute.toFixed(2))},
   {item: 'Full processing cost per minute (INR)', value: overview.costs.processing_inr_per_audio_minute ?? 'Unmeasured'},
-  {item: 'Final method API cost per audio minute (INR)', value: methodCost ? `${methodCost.inr_per_audio_minute} on one clean pass (${Object.entries(methodCost.stages_inr).map(([k, x]) => k.replaceAll('_', ' ') + ' ' + x).join(', ')}); proposal ceiling ${methodCost.proposal_ceiling_inr_per_minute}` : 'Unmeasured'},
+  {item: 'Final method API cost per audio minute (INR)', value: methodCost ? `${methodCost.inr_per_audio_minute} on one clean pass (${Object.entries(methodCost.stages_inr).map(([k, x]) => k.replaceAll('_', ' ') + ' ' + x).join(', ')}); Phase 1 allows ${overview.costs.phase1_allowed_inr_per_audio_minute} (INR 35,000 for the remaining archive)` : 'Unmeasured'},
   {item: 'Human validation', value: validation},
   {item: 'Worklist use', value: 'Retrospective suggestions as of last exported call. Confirm current status before outreach.'},
   {item: 'Sampling', value: '50 multi-call leads selected to give 300 calls. Findings do not estimate archive conversion.'},

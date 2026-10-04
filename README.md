@@ -98,7 +98,8 @@ the entire archive. Timestamps preserve source values with timezone unconfirmed.
 
 ## Cost and accuracy gate
 
-The proposal uses INR 0.60/audio-minute and satisfactory held-out accuracy as the scale-up gate. The
+The final proposal (2 Oct 2026) moves to Phase 1 if the pilot shows the remaining archive fits Phase 1's
+INR 35,000 API cost (about INR 1.19 per audio minute) and held-out accuracy checks out. The
 internal workbook reports external API spend per audio minute separately from unmeasured labour, hardware
 and setup costs. Unknown costs and an unsigned validation pack cannot be read as a passed gate.
 

@@ -69,10 +69,23 @@ def cost_summary(store, calls):
             "local_compute_inr_per_hour_assumption": local_rate,
             "processing_cost_inr": round(total, 4) if total is not None else None,
             "processing_inr_per_audio_minute": round(total / minutes, 5) if total is not None and minutes else None,
-            "commercial_ceiling_inr_per_minute": .60,
+            # Final proposal (2 Oct 2026): Phase 1 goes ahead if the remaining archive fits its INR 35,000 API cost.
+            **phase1_gate(store, minutes),
             "cost_gate": "Not assessed: local compute allocation and quality approval required",
             "failed_attempts": sum(e.get("status") == "failed" for e in inference),
             "excluded": "Engineering and human QA labour, model-download setup, taxes and storage allocation; record separately"}
+
+
+PHASE1_API_COST_INR = 35000
+
+
+def phase1_gate(store, pilot_minutes):
+    source = store.path("source.json")
+    if not source.exists():
+        return {"phase1_api_cost_inr": PHASE1_API_COST_INR, "phase1_allowed_inr_per_audio_minute": None}
+    remaining = read_json(source)["audio_minutes"] - pilot_minutes
+    return {"phase1_api_cost_inr": PHASE1_API_COST_INR, "phase1_remaining_audio_minutes": round(remaining),
+            "phase1_allowed_inr_per_audio_minute": round(PHASE1_API_COST_INR / remaining, 3) if remaining > 0 else None}
 
 
 def quality_coverage(extraction):

@@ -2,7 +2,8 @@
 
 Python CLI that turns a client CRM call export and recordings into evidence-linked, model-verified call
 extractions, per-lead next actions, a two-sheet client workbook, an internal workbook and a Word report for a
-~300-call / 50-lead paid pilot (proposal SAI-Q-2026-013). Scope: docs/pilot-scope.md. QA: docs/qa-protocol.md.
+~300-call / 50-lead paid pilot. The final proposal SAI-Q-2026-013 (2 Oct 2026, private under data/source/)
+is the authority; read it before changing deliverables. Scope: docs/pilot-scope.md. QA: docs/qa-protocol.md.
 Method history: docs/local-evaluation.md. PROJECT_HANDOFF.md is an untracked 3 Oct 2026 snapshot; verify it.
 
 ## Hard rules
