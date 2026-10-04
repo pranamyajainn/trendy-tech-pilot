@@ -53,9 +53,10 @@ Rules:
 - timing_status_check: the agreed date if one exists, written as history, plus what to reconfirm first.
 - evidence: one to three call_id and segment_id references from the history that support the action.
 - Plain language for a sales manager. No technical labels, probabilities, scores, or hot/warm/cold labels.
+  Never write call IDs, segment numbers or underscored labels in the text; refer to calls by date.
   Refer to the person as "the prospect" or "the learner" and use they/them.
 Return JSON only."""
-PROMPT_VERSION = "lead-action-v1"
+PROMPT_VERSION = "lead-action-v2"
 
 
 def journeys(store, calls):
