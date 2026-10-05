@@ -211,9 +211,11 @@ class GeminiLabelledTranscriber(GeminiTranscriber):
             return read_json(path)
         size = LABELLED_ASR["chunk_seconds"]
         starts = piece_starts(meta["duration_seconds"])
-        start, pieces = time.monotonic(), []
+        start, pieces, paid_now = time.monotonic(), [], 0.0
         for offset in starts:
-            pieces.append(self._piece(cid, meta, fingerprint, offset, size, force))
+            piece, paid = self._piece(cid, meta, fingerprint, offset, size, force)
+            pieces.append(piece)
+            paid_now += paid
         turns, flags, joins = stitch([parse_turns(p["text"]) for p in pieces])
         if not turns:
             flags.append("no_speech_transcribed")
@@ -224,13 +226,13 @@ class GeminiLabelledTranscriber(GeminiTranscriber):
         write_json(path, artifact)
         self.store.event(stage="transcribe", call_id=cid, system=LABELLED_ASR["version"], model=self.model_id,
                          status="success", fingerprint=fingerprint, audio_seconds=meta["duration_seconds"],
-                         wall_seconds=time.monotonic() - start, external_cost_inr=sum(p["inr"] for p in pieces))
+                         wall_seconds=time.monotonic() - start, external_cost_inr=paid_now)  # cached pieces cost nothing
         return artifact
 
     def _piece(self, cid, meta, fingerprint, offset, seconds, force):
         path = self.store.path("asr", "gemini-labelled-pieces", f"{cid}-{offset}.json")
         if path.exists() and not force and read_json(path)["fingerprint"] == fingerprint:
-            return read_json(path)
+            return read_json(path), 0.0
         body = {"contents": [{"role": "user", "parts": [
                     {"inlineData": {"mimeType": "audio/wav",
                                     "data": base64.b64encode(wav_piece(meta["file"], offset, seconds)).decode()}},
@@ -264,4 +266,4 @@ class GeminiLabelledTranscriber(GeminiTranscriber):
         piece = {"fingerprint": fingerprint, "offset": offset, "text": text, "input_tokens": n_in,
                  "output_tokens": n_out, "inr": cost}
         write_json(path, piece)
-        return piece
+        return piece, cost

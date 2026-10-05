@@ -91,3 +91,28 @@ def test_customer_cohort_takes_fully_converted_leads_outside_the_pilot_and_stays
     write_json(store.path("calls.json"), [call("1", 1, "Yes")])
     with pytest.raises(ValueError, match="already fixed"):
         cohort.build(store)
+
+
+def test_restitching_from_cached_pieces_logs_no_new_spend(tmp_path, monkeypatch):
+    import httpx
+
+    from trendytech_pilot import remote_asr
+    from trendytech_pilot.storage import read_json
+    monkeypatch.setenv("PILOT_ALLOW_REMOTE", "1")
+    monkeypatch.setenv("GEMINI_API_KEY", "synthetic-test-key")
+    monkeypatch.setattr(remote_asr, "wav_piece", lambda path, start, seconds: b"synthetic-wav")
+    store = Store(tmp_path)
+    write_json(store.path("audio", "Ctest.json"), {"sha256": "synthetic", "file": "x.wav", "duration_seconds": 90})
+    body = {"candidates": [{"finishReason": "STOP", "content": {"parts": [{"text": "Agent: Hello.\nCustomer: Yes."}]}}],
+            "usageMetadata": {"promptTokenCount": 3000, "candidatesTokenCount": 20}}
+    requests = []
+    client = httpx.Client(transport=httpx.MockTransport(lambda r: requests.append(r) or httpx.Response(200, json=body)))
+    asr = remote_asr.GeminiLabelledTranscriber(store, client)
+    first = asr.transcribe({"call_id": "Ctest"})
+    assert [t["role"] for t in first["turns"]] == ["agent", "prospect"]
+    asr.transcribe({"call_id": "Ctest"}, force=False)
+    store.path("asr", "gemini-labelled", "Ctest.json").unlink()  # e.g. a stitching change: pieces are reused
+    asr.transcribe({"call_id": "Ctest"})
+    spend = [e["external_cost_inr"] for e in store.events() if e["status"] == "success"]
+    assert len(requests) == 1 and spend[0] > 0 and spend[1] == 0
+    assert read_json(store.path("api-budget.json"))["committed_inr"] == pytest.approx(spend[0])
