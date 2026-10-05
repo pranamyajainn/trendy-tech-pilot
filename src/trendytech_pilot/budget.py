@@ -14,8 +14,11 @@ from .storage import read_json, write_json
 # because ~INR 500 stays held for quota-rejected requests made before rejections were settled as unbilled.
 # Owner decision, 5 Oct 2026: INR 13,000 for the customer cohort on method v3 (about INR 9,000 estimated for
 # 2,772 calls plus validation), approved with "yes lets go all the way into this".
+# Owner decision, 6 Oct 2026: INR 15,000, so the 150-lead non-buyer sample runs automatically after the customers
+# run ("Feel free to raise it ... maybe we can limit it to 15,000"). The ceiling counts buffered estimates and
+# reservations never billed, so it sits above real provider charges.
 # Sarvam usage is counted at list price. PILOT_API_CAP_INR may only lower the ceiling.
-MAX_CAP_INR = 13000
+MAX_CAP_INR = 15000
 # A request whose billing is unknown after one of these errors keeps its reservation.
 UNCERTAIN_ERRORS = (httpx.HTTPError, KeyError, RuntimeError, ValueError)
 
