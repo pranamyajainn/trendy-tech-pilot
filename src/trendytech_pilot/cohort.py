@@ -2,6 +2,9 @@
 
 customers: every call of every lead whose calls are all flagged "Is Converted = Yes" in the client export, except
 leads already in the pilot. Leads with mixed flags are left out: the flag is not consistent over their calls.
+open_sample: the non-buyer side of the scoring yardstick. A seeded random 150 of the leads with no "Yes" flag on any
+call and at least one call of 3+ minutes (a real conversation), outside the pilot, with all their calls. "Not
+converted" means no purchase recorded by the export date, not "will never buy".
 """
 
 from collections import defaultdict
@@ -10,7 +13,10 @@ from datetime import UTC, datetime
 from .storage import digest, read_json, write_json
 
 DEFINITIONS = {"customers": "All calls of leads whose every exported call is flagged Is Converted = Yes, "
-                            "excluding leads in the pilot selection"}
+                            "excluding leads in the pilot selection",
+               "open_sample": "All calls of a seeded random 150 leads with no Yes flag and a call of 3+ minutes, "
+                              "excluding leads in the pilot selection"}
+OPEN_SAMPLE_SIZE, OPEN_MIN_SECONDS = 150, 180
 
 
 def build(store, name="customers"):
@@ -21,14 +27,23 @@ def build(store, name="customers"):
     leads = defaultdict(list)
     for call in calls:
         leads[call["lead_number"]].append(call)
-    chosen = sorted((lead for lead, group in leads.items() if lead not in pilot
-                     and all(c["crm_conversion_flag"] == "Yes" for c in group)), key=lambda lead: digest([name, lead]))
+    if name == "customers":
+        keep = lambda group: all(c["crm_conversion_flag"] == "Yes" for c in group)
+    else:
+        keep = lambda group: (all(c["crm_conversion_flag"] != "Yes" for c in group)
+                              and max(c["duration_seconds"] for c in group) >= OPEN_MIN_SECONDS)
+    chosen = sorted((lead for lead, group in leads.items() if lead not in pilot and keep(group)),
+                    key=lambda lead: digest([name, lead]))
+    if name == "open_sample":
+        chosen = chosen[:OPEN_SAMPLE_SIZE]
     records = []
     for index, lead in enumerate(chosen, 1):
         group = sorted(leads[lead], key=lambda c: (c["created_on"], c["call_id"]))
         for number, call in enumerate(group, 1):
-            records.append({**call, "lead_alias": f"K{index:03d}", "call_number_in_export": number, "split": name,
-                            "journey_outcome_label": "CRM reported converted; unverified",
+            records.append({**call, "lead_alias": f"{'K' if name == 'customers' else 'N'}{index:03d}",
+                            "call_number_in_export": number, "split": name,
+                            "journey_outcome_label": ("CRM reported converted; unverified" if name == "customers"
+                                                      else "No conversion recorded by the export date"),
                             "available_calls_for_lead": len(group)})
     manifest = {"name": name, "definition": DEFINITIONS[name], "source_sha256": read_json(store.path("source.json"))["sha256"],
                 "sha256": digest(records), "calls": records}

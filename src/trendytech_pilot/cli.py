@@ -106,7 +106,7 @@ def main():
         if command != "download":
             sub.add_argument("--force", action="store_true")
     cohort = commands.add_parser("cohort")
-    cohort.add_argument("name", choices=["customers"])
+    cohort.add_argument("name", choices=["customers", "open_sample"])
     cohort_action = cohort.add_mutually_exclusive_group()
     cohort_action.add_argument("--freeze", action="store_true", help="Freeze the method for a full cohort run")
     cohort_action.add_argument("--supersede", metavar="REASON")

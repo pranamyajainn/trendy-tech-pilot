@@ -257,7 +257,9 @@ class GeminiLabelledTranscriber(GeminiTranscriber):
             candidate = result["candidates"][0]
             if candidate.get("finishReason") not in ("STOP", None):
                 raise ValueError("Transcription incomplete; a cut-off transcript is never accepted")
-            text = "".join(p.get("text", "") for p in candidate["content"]["parts"] if not p.get("thought"))
+            # A finished answer with no parts is Gemini hearing no speech; the call is kept and flagged, not failed.
+            parts = (candidate.get("content") or {}).get("parts") or []
+            text = "".join(p.get("text", "") for p in parts if not p.get("thought"))
         except BaseException as exc:
             self.store.event(stage="transcribe", call_id=cid, system=LABELLED_ASR["version"], model=self.model_id,
                              status="interrupted" if isinstance(exc, KeyboardInterrupt) else "failed", offset=offset,

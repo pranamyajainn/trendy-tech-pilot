@@ -116,3 +116,32 @@ def test_restitching_from_cached_pieces_logs_no_new_spend(tmp_path, monkeypatch)
     spend = [e["external_cost_inr"] for e in store.events() if e["status"] == "success"]
     assert len(requests) == 1 and spend[0] > 0 and spend[1] == 0
     assert read_json(store.path("api-budget.json"))["committed_inr"] == pytest.approx(spend[0])
+
+
+def test_open_sample_takes_leads_with_a_real_conversation_and_no_purchase(tmp_path, monkeypatch):
+    monkeypatch.setattr(cohort, "OPEN_SAMPLE_SIZE", 1)
+    store = Store(tmp_path)
+    long_open = [{**call("5", 1, None), "duration_seconds": 300}, call("5", 2, None)]
+    write_json(store.path("calls.json"), [call("1", 1, "Yes"), call("3", 1, "Yes"), call("3", 2, None), call("4", 1, None),
+                                          *long_open])
+    write_json(store.path("selection.json"), {"calls": []})
+    write_json(store.path("source.json"), {"sha256": "s"})
+    result = cohort.build(store, "open_sample")
+    assert (result["leads"], result["calls"]) == (1, 2)  # 1 bought, 3 has a Yes, 4 only a 1-minute call
+    assert {c["lead_alias"] for c in cohort.calls_of(store, "open_sample")} == {"N001"}
+
+
+def test_a_finished_answer_with_no_text_is_recorded_as_no_speech(tmp_path, monkeypatch):
+    import httpx
+
+    from trendytech_pilot import remote_asr
+    monkeypatch.setenv("PILOT_ALLOW_REMOTE", "1")
+    monkeypatch.setenv("GEMINI_API_KEY", "synthetic-test-key")
+    monkeypatch.setattr(remote_asr, "wav_piece", lambda path, start, seconds: b"synthetic-wav")
+    store = Store(tmp_path)
+    write_json(store.path("audio", "Cquiet.json"), {"sha256": "synthetic", "file": "x.wav", "duration_seconds": 50})
+    body = {"candidates": [{"finishReason": "STOP", "content": {}}],
+            "usageMetadata": {"promptTokenCount": 1400, "thoughtsTokenCount": 400}}
+    client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, json=body)))
+    artifact = remote_asr.GeminiLabelledTranscriber(store, client).transcribe({"call_id": "Cquiet"})
+    assert artifact["turns"] == [] and artifact["flags"] == ["no_speech_transcribed"]
