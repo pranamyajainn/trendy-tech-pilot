@@ -161,6 +161,27 @@ def merge(extraction, claims, verdicts):
     return merged, review, tiers
 
 
+def tripwire(merged, review, tiers, whisper_text):
+    """Method v3: a kept claim whose quotes the local Whisper transcript did not hear is moved to review as
+    "unconfirmed". The item is kept with the review entry, so profile analysis can count it as unconfirmed."""
+    from .labelled import heard_by_whisper
+    from .schema import normalise
+
+    heard = set(normalise(whisper_text).split())
+    for collection in COLLECTIONS:
+        kept = []
+        for item in merged[collection]:
+            quotes = [item[k]["quote"] for k in ("evidence", "response_evidence", "resolution_evidence") if item.get(k)]
+            if all(heard_by_whisper(q, heard) for q in quotes):
+                kept.append(item)
+                continue
+            tiers["of_which_unconfirmed"] += 1  # also counted in its verifier tier
+            review.append({"collection": collection, "tier": "unconfirmed", "item": item,
+                           "claim": item.get("value") or item.get("description") or item.get("concern") or item.get("topic"),
+                           "reason": "The independent transcript did not hear these words; listen before use"})
+        merged[collection] = kept
+
+
 def verified_extract(call, store, extractor, verifier, force=False):
     from .artifacts import current_source
 
@@ -196,6 +217,8 @@ def verified_extract(call, store, extractor, verifier, force=False):
                         wall_seconds=time.monotonic() - start, external_cost_inr=0)
             raise
     merged, review, tiers = merge(extraction, claims, verdicts)
+    if transcript.get("source") == "gemini_labelled":
+        tripwire(merged, review, tiers, transcript["whisper_text"])
     final = CallExtraction.model_validate(merged)
     errors = validate_evidence(final, transcript)
     if errors:

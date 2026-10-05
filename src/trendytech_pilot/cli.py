@@ -13,9 +13,13 @@ from .storage import Store, digest, read_json, write_json
 PROVIDERS = ("local", "gemini", "verified")
 
 
-def selected_calls(store, split="development", limit=None, call_ids=None):
-    calls = read_json(store.path("selection.json"))["calls"]
-    if split != "all":
+def selected_calls(store, split="development", limit=None, call_ids=None, cohort=None):
+    if cohort:
+        from .cohort import calls_of
+        calls, split = calls_of(store, cohort), cohort
+    else:
+        calls = read_json(store.path("selection.json"))["calls"]
+    if split not in ("all", cohort):
         calls = [c for c in calls if c["split"] == split]
     if call_ids:
         missing = set(call_ids) - {c["call_id"] for c in calls}
@@ -92,13 +96,20 @@ def main():
     audit.add_argument("workbook", type=Path)
     sample = commands.add_parser("select")
     sample.add_argument("--seed", default="trendytech-pilot-v1")
-    for command in ["download", "transcribe", "cross-transcribe", "sarvam-transcribe", "resolve", "extract"]:
+    for command in ["download", "transcribe", "cross-transcribe", "sarvam-transcribe", "gemini-transcribe", "resolve",
+                    "extract"]:
         sub = commands.add_parser(command)
         sub.add_argument("--split", choices=["development", "holdout", "all"], default="development")
+        sub.add_argument("--cohort", help="Process a fixed post-pilot cohort (see `pilot cohort`) instead of a split")
         sub.add_argument("--limit", type=int)
-        sub.add_argument("--calls", help="Comma-separated call IDs within the split")
+        sub.add_argument("--calls", help="Comma-separated call IDs within the split or cohort")
         if command != "download":
             sub.add_argument("--force", action="store_true")
+    cohort = commands.add_parser("cohort")
+    cohort.add_argument("name", choices=["customers"])
+    cohort_action = cohort.add_mutually_exclusive_group()
+    cohort_action.add_argument("--freeze", action="store_true", help="Freeze the method for a full cohort run")
+    cohort_action.add_argument("--supersede", metavar="REASON")
     commands.add_parser("status")
     freeze = commands.add_parser("freeze")
     freeze_action = freeze.add_mutually_exclusive_group()
@@ -132,6 +143,12 @@ def main():
                           "current_consensus": sum(current_consensus(store, c["call_id"]) is not None for c in calls),
                           "current_extractions": sum(current_extraction(store, c["call_id"]) is not None for c in calls),
                           "method_frozen": store.path("method-freeze.json").exists()}, indent=2))
+    elif args.command == "cohort":
+        from .cohort import build, freeze
+        if args.freeze or args.supersede:
+            print(json.dumps(freeze(store, args.name, args.supersede), indent=2))
+        else:
+            print(json.dumps(build(store, args.name), indent=2))
     elif args.command == "freeze" and args.retire:
         print(json.dumps(retire_freeze(store, args.retire), indent=2))
     elif args.command == "freeze":
@@ -162,7 +179,10 @@ def main():
         from .client import export_client, validation_pack
         print(json.dumps({**validation_pack(store), **export_client(store)}, indent=2))
     else:
-        calls = selected_calls(store, args.split, args.limit, args.calls.split(",") if args.calls else None)
+        calls = selected_calls(store, args.split, args.limit, args.calls.split(",") if args.calls else None, args.cohort)
+        if args.cohort and args.command in ("gemini-transcribe", "extract"):
+            from .cohort import check_frozen
+            check_frozen(store, args.cohort, whole_cohort=not args.calls)
         if args.command != "download" and (store.path("method-freeze.json").exists()
                                              or any(c["split"] == "holdout" for c in calls)):
             verify_freeze(store, asr_model, llm_model)
@@ -170,6 +190,9 @@ def main():
         if args.command == "cross-transcribe":
             from .remote_asr import GeminiTranscriber
             worker = GeminiTranscriber(store)
+        elif args.command == "gemini-transcribe":
+            from .remote_asr import GeminiLabelledTranscriber
+            worker = GeminiLabelledTranscriber(store)
         elif args.command == "resolve":
             from .resolve import GeminiResolver
             worker = GeminiResolver(store)
@@ -203,7 +226,7 @@ def main():
                 elif args.command == "transcribe":
                     from .audio import transcribe
                     transcribe(call, store, asr_model, args.force)
-                elif args.command == "cross-transcribe":
+                elif args.command in ("cross-transcribe", "gemini-transcribe"):
                     worker.transcribe(call, args.force)
                 elif args.command == "resolve":
                     from .artifacts import current_transcript

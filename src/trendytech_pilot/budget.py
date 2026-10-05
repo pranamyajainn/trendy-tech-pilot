@@ -12,8 +12,10 @@ from .storage import read_json, write_json
 # Owner decisions, 3 Oct 2026: the project ceiling rose from INR 500 to INR 2,000 for multi-model verification,
 # then to INR 3,500 for the three-system consensus ("we don't have to care about the budget"), then to INR 4,000
 # because ~INR 500 stays held for quota-rejected requests made before rejections were settled as unbilled.
+# Owner decision, 5 Oct 2026: INR 13,000 for the customer cohort on method v3 (about INR 9,000 estimated for
+# 2,772 calls plus validation), approved with "yes lets go all the way into this".
 # Sarvam usage is counted at list price. PILOT_API_CAP_INR may only lower the ceiling.
-MAX_CAP_INR = 4000
+MAX_CAP_INR = 13000
 # A request whose billing is unknown after one of these errors keeps its reservation.
 UNCERTAIN_ERRORS = (httpx.HTTPError, KeyError, RuntimeError, ValueError)
 

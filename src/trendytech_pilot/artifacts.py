@@ -2,8 +2,9 @@
 
 from .audio import ASR_VERSION
 from .extract import PROMPT_VERSION, SYSTEM, extraction_fingerprint, generation_config
+from .labelled import ALIGNMENT, timed_segments
 from .models import LOCAL_REVISIONS
-from .remote_asr import GEMINI_ASR
+from .remote_asr import GEMINI_ASR, LABELLED_ASR, STITCH
 from .remote_sarvam import SARVAM_ASR
 from .resolve import RESOLVER
 from .schema import EVIDENCE_RULES_VERSION
@@ -55,10 +56,28 @@ def current_consensus(store, call_id):
     return {**consensus, "flags": whisper["flags"], "duration_seconds": whisper["duration_seconds"]}
 
 
+def current_labelled(store, call_id):
+    """Method v3: Gemini's labelled turns, timed from the current Whisper transcript (which also feeds the
+    tripwire in ensemble.verified_extract)."""
+    whisper = current_transcript(store, call_id)
+    path = store.path("asr", "gemini-labelled", call_id + ".json")
+    if not whisper or not path.exists():
+        return None
+    labelled, audio = read_json(path), read_json(store.path("audio", call_id + ".json"))
+    if labelled.get("fingerprint") != digest([digest([audio["sha256"], LABELLED_ASR]), STITCH]):
+        return None
+    return {"call_id": call_id, "source": "gemini_labelled",
+            "fingerprint": digest([labelled["fingerprint"], whisper["fingerprint"], ALIGNMENT]),
+            "segments": timed_segments(labelled["turns"], whisper["segments"]),
+            "whisper_text": " ".join(s["text"] for s in whisper["segments"]),
+            "flags": sorted(set(whisper["flags"]) | set(labelled["flags"])), "duration_seconds": whisper["duration_seconds"]}
+
+
 def current_source(store, call_id):
-    """The transcript that extraction, evidence timestamps and transcription QA use under the current method."""
+    """The transcript that extraction, evidence timestamps and transcription QA use. Pilot calls keep their
+    method v2 consensus; calls processed later (the customer cohort) have only the v3 labelled transcript."""
     if TRANSCRIPT_SOURCE == "consensus":
-        return current_consensus(store, call_id)
+        return current_consensus(store, call_id) or current_labelled(store, call_id)
     return current_transcript(store, call_id)
 
 
