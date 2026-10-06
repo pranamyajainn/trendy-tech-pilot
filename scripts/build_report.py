@@ -80,7 +80,10 @@ def build(root):
          f"moments in them, that it rests on.")
 
     para("Which leads to work first", "Heading 1")
-    table(["Category", "Leads"], Counter(a["category"] for a in actions).most_common())
+    order = ["Hot", "Warm", "Cold", "Insufficient evidence", "Not reached", "Not target", "Check purchase status",
+             "Already a customer"]
+    counts = Counter(a["category"] for a in actions)
+    table(["Category", "Leads"], [(c, counts[c]) for c in order if counts[c]])
     para("Each open lead falls into one group based on what they said in their sales calls, and each group's "
          "category comes from how similar past leads turned out. The Lead Priorities sheet shows every lead's "
          "group, how similar past leads turned out with a range, open concerns, a next action and the moments "
@@ -99,9 +102,9 @@ def build(root):
         table(["Factor", "Bought, with it", "Bought, without it", "Strength of the link"],
               [(f["factor"], f["bought_with_it"], f["bought_without_it"], f["strength"])
                for f in predictors if f["evidence"] == "Clear"])
-        unclear = [f["factor"].lower() for f in predictors if f["evidence"] != "Clear"]
-        para(f"No clear link was found for the other {len(unclear)} factors, including "
-             + ", ".join(unclear[:6]) + ". In particular, agreeing to a follow-up call did not predict buying.")
+        unclear = [f["factor"] for f in predictors if f["evidence"] != "Clear"]
+        para(f"No clear link was found for the other {len(unclear)} factors (for example: " + "; ".join(unclear[:6])
+             + "). In particular, agreeing to a follow-up call did not predict buying.")
     if groups:
         para("How the groups held up on later leads", "Heading 1")
         para("Groups were graded on leads first called from January to May, then checked on different leads first "
