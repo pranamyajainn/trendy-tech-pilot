@@ -139,3 +139,8 @@ def test_reviewer_edits_replace_drafted_text_but_not_the_category(tmp_path):
     write_json(store.path("review", "lead-action-edits.json"), {"L1": {"action_category": "Confirm enrollment"}})
     with pytest.raises(ValueError, match="fixed field"):
         export_client(store)
+
+
+def test_a_customers_own_words_may_name_a_tool_but_system_text_may_not():
+    assert client.VERBATIM_TEXT.search("Gemini Solutions Pvt Ltd") is None
+    assert client.VERBATIM_TEXT.search("see C0123456789abcdef") and client.INTERNAL_TEXT.search("Checked by Gemini")

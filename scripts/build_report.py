@@ -73,9 +73,10 @@ def build(root):
          + ("  |  Review draft" if meta.get("review_draft") else ""))
     para(meta["scope_note"])
     para(f"We reviewed 300 recorded calls across 50 leads from the September 2026 call export. To judge which "
-         f"leads are likely to buy, we compared {comparison.get('buyers', 'the')} past customers with "
-         f"{comparison.get('non_buyers', 'a sample of')} randomly chosen leads who had a real sales conversation "
-         f"but did not buy. This report covers which leads to work first, what separates buyers from non-buyers, "
+         f"leads are likely to buy, we also processed the calls of all {comparison.get('customers_total', 'the')} "
+         f"past customers outside the pilot. The {comparison.get('buyers', '')} of them who had at least one real "
+         f"conversation (a call of three minutes or more) were compared with {comparison.get('non_buyers', 'a sample of')} "
+         f"randomly chosen leads who also had one but did not buy. This report covers which leads to work first, what separates buyers from non-buyers, "
          f"who buys, and {len(insights)} changes to the sales approach. Every statement shows the calls, and the "
          f"moments in them, that it rests on.")
 

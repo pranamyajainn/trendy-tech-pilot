@@ -8,7 +8,7 @@ const root = path.resolve(process.argv[2] || 'data');
 const read = async name => JSON.parse(await fs.readFile(path.join(root, 'exports', 'client', name + '.json'), 'utf8'));
 const optional = name => read(name).catch(() => []);
 const [meta, insights, actions] = await Promise.all(['meta', 'sales_insights', 'lead_actions'].map(read));
-const [swot, predictors, groups, who] = await Promise.all(['lead_swot', 'predictors', 'lead_groups', 'who_buys'].map(optional));
+const [swot, predictors, groups, who, customers] = await Promise.all(['lead_swot', 'predictors', 'lead_groups', 'who_buys', 'customer_profiles'].map(optional));
 const workbook = Workbook.create();
 const safe = value => {
   if (value == null) return '';
@@ -97,6 +97,24 @@ if (who.length) sheet('Who Buys', 'Who buys, compared with who does not', who, [
   {key: 'share_of_buyers', label: 'Share of buyers', width: 16},
   {key: 'share_of_non_buyers', label: 'Share of non-buyers', width: 18},
 ], 'Shares of leads where the trait was stated.');
+if (customers.length) sheet('Customer Profiles', 'What each past customer said about themselves', customers, [
+  {key: 'lead_identifier', label: 'Lead identifier', width: 13},
+  {key: 'calls', label: 'Calls', width: 7},
+  {key: 'experience_years', label: 'Experience (years)', width: 11},
+  {key: 'fresher', label: 'Fresher', width: 9},
+  {key: 'background', label: 'Background', width: 11},
+  {key: 'career_gap', label: 'Career gap', width: 11},
+  {key: 'working_now', label: 'Working now', width: 11},
+  {key: 'current_role', label: 'Current role', width: 24},
+  {key: 'company', label: 'Company', width: 22},
+  {key: 'location', label: 'Location', width: 16},
+  {key: 'salary_lakh_per_year', label: 'Salary (lakh per year)', width: 11},
+  {key: 'target_role', label: 'Target role', width: 18},
+  {key: 'reason_for_the_course', label: 'Reason for the course', width: 28},
+  {key: 'course_for', label: 'Course for', width: 13},
+  {key: 'trendytech_exclusion', label: 'TrendyTech exclusion', width: 18},
+  {key: 'evidence', label: 'Where it was said', width: 60},
+], 'One row per customer. Blank means not stated in any recorded call; nothing is guessed.');
 sheet('Sales Insights', 'What should change in the sales approach', insights, [
   {key: 'finding', label: 'Finding', width: 34},
   {key: 'evidence_and_scale', label: 'Evidence and scale', width: 46},

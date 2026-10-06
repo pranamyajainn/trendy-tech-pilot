@@ -310,6 +310,10 @@ INSIGHT_COLUMNS = ("finding", "evidence_and_scale", "sales_implication", "recomm
 # Client sheets carry no processing details: system names, call IDs, links, split labels or snake_case field names.
 INTERNAL_TEXT = re.compile(r"gemini|whisper|sarvam|saaras|fingerprint|h[eo]ld[- ]?out|development (?:split|calls?)"
                            r"|\bC[0-9a-f]{16}\b|https?://|\b[a-z]+_[a-z_]+\b", re.IGNORECASE)
+# Words people said, and the names they gave, are kept as said: "Gemini" can be a customer's employer or a tool they
+# use. These fields are still checked for call IDs, links and internal labels.
+VERBATIM_FIELDS = {"company", "current_role", "location", "evidence", "supporting_evidence"}
+VERBATIM_TEXT = re.compile(r"\bC[0-9a-f]{16}\b|https?://|\b[a-z]+_[a-z_]+\b")
 
 
 def export_client(store):
@@ -345,14 +349,16 @@ def export_client(store):
     rows = analysis.pop("lead_priorities", rows)
     for row in insights + rows + [r for sheet in analysis.values() for r in sheet]:
         for key, value in row.items():
-            if match := INTERNAL_TEXT.search(str(value)):
+            if match := (VERBATIM_TEXT if key in VERBATIM_FIELDS else INTERNAL_TEXT).search(str(value)):
                 raise ValueError(f"Client text contains internal detail {match.group()!r} in {key}; fix the source text")
     status = validation_status(store)
     patterns_path = store.path("review", "patterns.json")
     comparison = None
     if patterns_path.exists():
         found = read_json(patterns_path)
-        comparison = {"buyers": found["leads"]["buyers"], "non_buyers": found["leads"]["non_buyers"],
+        customers = read_json(store.path("cohorts", "customers.json"))["calls"]
+        comparison = {"customers_total": len({x["lead_number"] for x in customers}),
+                      "buyers": found["leads"]["buyers"], "non_buyers": found["leads"]["non_buyers"],
                       "non_buyer_population": 1448, "buyers_profiled": found["who_buys"]["profiled_buyers"],
                       "later_buyers_in_hot": found["later_check"]["buyers_in_hot_groups"],
                       "later_buyers_grouped": found["later_check"]["buyers_grouped"]}
@@ -438,7 +444,48 @@ def analysis_sheets(store, action_rows):
     who = [{"trait": r["trait"], "value": r["value"], "share_of_buyers": f"{pct(r['buyer_share'])} ({r['buyers']})",
             "share_of_non_buyers": f"{pct(r['non_buyer_share'])} ({r['non_buyers']})"} for r in result["who_buys"]["rows"]]
     return {"lead_priorities": priorities, "lead_swot": swot, "predictors": predictors, "lead_groups": groups,
-            "who_buys": who}
+            "who_buys": who, "customer_profiles": customer_profiles(store)}
+
+
+def customer_profiles(store):
+    """One row per customer (customers cohort) with every profile parameter in plain words and the call moments
+    behind it. Values not stated in any call are left blank, not guessed."""
+    from .patterns import PROFILE_LABELS, exclusions
+    from .profile import lead_calls
+
+    labels = {field: values for field, (_, values) in PROFILE_LABELS.items()}
+    yes_no = {"yes": "Yes", "no": "No"}
+    gap = {"over_1_year": "Over a year", "up_to_1_year": "Up to a year"}
+    target = {"data_engineering": "Data engineering", "data_science_ml": "Data science / ML",
+              "cloud_devops": "Cloud / DevOps", "data_analytics_bi": "Analytics / BI",
+              "stay_in_current_role": "Stay in current role", "other": "Other"}
+    rows = []
+    for lead, calls in lead_calls(store, "customers").items():
+        path = store.path("review", "profiles", lead + ".json")
+        if not path.exists():
+            continue
+        record = read_json(path)
+        p = record["profile"]
+        evidence = []
+        for field, items in record.get("evidence", {}).items():
+            for e in items[:1]:
+                call = next(c for c in calls if c["call_id"] == e["call_id"])
+                when = f"{int(e['start']) // 60}:{int(e['start']) % 60:02d}" if e.get("start") is not None else "?"
+                evidence.append(f"{field.replace('_', ' ').capitalize()}: {human_date(call['created_on'])} at {when}: "
+                                f"“{e['quote'][:160]}”")
+        rows.append({"lead_identifier": lead, "calls": len(calls),
+                     "experience_years": "" if p["experience_years"] is None else f"{p['experience_years']:g}",
+                     "fresher": yes_no.get(p["fresher"], ""), "background": labels["background"].get(p["background"], ""),
+                     "career_gap": gap.get(p["career_gap"], ""), "working_now": labels["employment"].get(p["employment"], ""),
+                     "current_role": p["current_role"] or labels["current_role_group"].get(p["current_role_group"], ""),
+                     "company": p["company"], "location": p["location"] or labels["location_group"].get(p["location_group"], ""),
+                     "salary_lakh_per_year": "" if p["salary_lpa"] is None else f"{p['salary_lpa']:g}",
+                     "target_role": target.get(p["target_role_group"], ""),
+                     "reason_for_the_course": labels["motivation"].get(p["motivation"], ""),
+                     "course_for": {"self": "Themselves", "team_or_juniors": "A team or juniors"}.get(p["buyer_for"], ""),
+                     "trendytech_exclusion": ", ".join(exclusions(record)) or "None",
+                     "evidence": "\n".join(evidence)})
+    return sorted(rows, key=lambda r: r["lead_identifier"])
 
 
 def validation_pack(store, sample_size=100, seed="trendytech-audit-v1"):
