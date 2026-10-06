@@ -341,16 +341,104 @@ def export_client(store):
                      "supporting_evidence": "\n".join(([a["basis"]] if a.get("basis") else []) + [
                          f"{human_date(e['date'])} at {e['timestamp']}: “{e['quote']}”" for e in a["evidence"]])})
     insights = [{k: insight[k] for k in INSIGHT_COLUMNS} for insight in insights]
-    for row in insights + rows:
+    analysis = analysis_sheets(store, rows)
+    rows = analysis.pop("lead_priorities", rows)
+    for row in insights + rows + [r for sheet in analysis.values() for r in sheet]:
         for key, value in row.items():
             if match := INTERNAL_TEXT.search(str(value)):
                 raise ValueError(f"Client text contains internal detail {match.group()!r} in {key}; fix the source text")
     status = validation_status(store)
+    patterns_path = store.path("review", "patterns.json")
+    comparison = None
+    if patterns_path.exists():
+        found = read_json(patterns_path)
+        comparison = {"buyers": found["leads"]["buyers"], "non_buyers": found["leads"]["non_buyers"],
+                      "non_buyer_population": 1448, "buyers_profiled": found["who_buys"]["profiled_buyers"],
+                      "later_buyers_in_hot": found["later_check"]["buyers_in_hot_groups"],
+                      "later_buyers_grouped": found["later_check"]["buyers_grouped"]}
     write_json(store.path("exports", "client", "meta.json"),
-               {"scope_note": SCOPE_NOTE, "review_draft": not status["complete"], "validation": status})
+               {"scope_note": SCOPE_NOTE, "review_draft": not status["complete"], "validation": status,
+                "comparison": comparison})
     write_json(store.path("exports", "client", "sales_insights.json"), insights)
     write_json(store.path("exports", "client", "lead_actions.json"), rows)
-    return {"insights": len(insights), "lead_actions": len(rows), "review_draft": not status["complete"]}
+    for name, sheet in analysis.items():
+        write_json(store.path("exports", "client", name + ".json"), sheet)
+    return {"insights": len(insights), "lead_actions": len(rows), **{k: len(v) for k, v in analysis.items()},
+            "review_draft": not status["complete"]}
+
+
+CATEGORY_ORDER = ["Hot", "Warm", "Cold", "Insufficient evidence", "Not reached", "Not target",
+                  "Check purchase status", "Already a customer"]
+
+
+def pct(value):
+    return f"{100 * value:.0f}%" if value is not None else "n/a"
+
+
+def analysis_sheets(store, action_rows):
+    """Client sheets from the buyer comparison (review/patterns.json) and SWOTs; empty if not yet run."""
+    path = store.path("review", "patterns.json")
+    if not path.exists():
+        return {}
+    result = read_json(path)
+    actions = {r["lead_identifier"]: r for r in action_rows}
+    priorities = []
+    for v in result["pilot_leads"]:
+        group = f"{v['group'].lower()} group" if v["group"] and v["group"] != "Not target" else None
+        if v["crm"] == "customer":
+            category = "Already a customer"
+            why = ("The CRM marks this lead as converted. "
+                   + (f"Before buying, their calls put them in the {group}, graded {v['category']}." if group else
+                      "No sales conversation before buying is in the recorded calls."))
+        elif v["crm"] == "mixed":
+            category = "Check purchase status"
+            why = f"The CRM marks some calls as converted and others not. {'; '.join(v['reasons'])}."
+        else:
+            category, why = v["category"], "; ".join(v["reasons"]) + "."
+        if v["other_factors"]:
+            why += " Also: " + "; ".join(v["other_factors"]) + "."
+        history = (f"{pct(v['group_rate'])} of {v['group_leads']} similar past leads bought "
+                   f"(range {pct(v['group_interval'][0])} to {pct(v['group_interval'][1])})"
+                   if v["group_rate"] is not None and v["group_interval"] else "Not enough similar past leads")
+        action = actions.get(v["lead_number"], {})
+        priorities.append({"lead_identifier": v["lead_number"], "assigned_owner": action.get("assigned_owner", ""),
+                           "category": category, "why_this_category": why, "similar_past_leads": history,
+                           "open_concerns": ", ".join(v["open_concerns"]).capitalize() or "None recorded",
+                           "last_sales_conversation": v["last_sales_conversation"] or "None recorded",
+                           **{k: action.get(k, "") for k in ("recommended_next_action", "suggested_wording",
+                                                             "timing_status_check", "supporting_evidence")}})
+    priorities.sort(key=lambda r: (CATEGORY_ORDER.index(r["category"]), r["lead_identifier"]))
+    cite = lambda points: "\n".join(f"{p['text']} ({human_date(p['evidence'][0]['date'])} at "
+                                     f"{p['evidence'][0]['timestamp']})" for p in points) or "None found in the calls"
+    category_of = {r["lead_identifier"]: r["category"] for r in priorities}
+    swot = [{"lead_identifier": s["lead_number"], "category": category_of.get(s["lead_number"], ""),
+             "summary": s["summary"], **{q: cite(s[q]) for q in ("strengths", "weaknesses", "opportunities", "threats")}}
+            for s in (read_json(f) for f in sorted(store.path("review", "swot").glob("*.json")))]
+    swot.sort(key=lambda r: (CATEGORY_ORDER.index(r["category"]) if r["category"] in CATEGORY_ORDER else 99,
+                             r["lead_identifier"]))
+    predictors = [{"factor": f["factor"], "buyers_with_it": f"{pct(f['buyer_share'])} ({f['buyers_with']})",
+                   "non_buyers_with_it": f"{pct(f['non_buyer_share'])} ({f['non_buyers_with']})",
+                   "bought_with_it": pct(f["rate_with"]), "bought_without_it": pct(f["rate_without"]),
+                   "difference": f"{f['difference_pp']:+.0f} points",
+                   "strength": (f"{f['odds_ratio']:.1f}x the odds (range {f['odds_ratio_interval'][0]:.1f} to "
+                                f"{f['odds_ratio_interval'][1]:.1f})"),
+                   "evidence": "Clear" if f["clear"] else "Not clear: could be chance"} for f in result["factors"]]
+    meaning = {"Committed": "Said they would pay or register", "Engaged": "Agreed a next call or asked for a demo, "
+               "without committing", "Other contacted": "Sales conversation with no commitment, decline or next step",
+               "Declined": "Said not interested in the latest sales conversation",
+               "Not target": "Fresher, non-IT background or career gap over a year (TrendyTech's exclusions)"}
+    groups = []
+    for name, text in meaning.items():
+        d, later = result["groups_development"][name], result["groups_later_check"][name]
+        span = lambda g: (f"{pct(g['rate'])} ({pct(g['interval'][0])} to {pct(g['interval'][1])})"
+                          if g["rate"] is not None and g["interval"] else "n/a")
+        groups.append({"group": name, "meaning": text, "category": d["category"],
+                       "bought_jan_may": span(d), "leads_jan_may": d["buyers"] + d["non_buyers"],
+                       "bought_jun_sep": span(later), "leads_jun_sep": later["buyers"] + later["non_buyers"]})
+    who = [{"trait": r["trait"], "value": r["value"], "share_of_buyers": f"{pct(r['buyer_share'])} ({r['buyers']})",
+            "share_of_non_buyers": f"{pct(r['non_buyer_share'])} ({r['non_buyers']})"} for r in result["who_buys"]["rows"]]
+    return {"lead_priorities": priorities, "lead_swot": swot, "predictors": predictors, "lead_groups": groups,
+            "who_buys": who}
 
 
 def validation_pack(store, sample_size=100, seed="trendytech-audit-v1"):

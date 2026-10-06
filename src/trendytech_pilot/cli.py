@@ -110,6 +110,15 @@ def main():
     cohort_action = cohort.add_mutually_exclusive_group()
     cohort_action.add_argument("--freeze", action="store_true", help="Freeze the method for a full cohort run")
     cohort_action.add_argument("--supersede", metavar="REASON")
+    profiles = commands.add_parser("profiles", help="One structured profile per lead, from all of its calls")
+    profiles.add_argument("group", choices=["customers", "open_sample", "pilot"])
+    profiles.add_argument("--limit", type=int)
+    profiles.add_argument("--leads", help="Comma-separated lead numbers within the group")
+    profiles.add_argument("--workers", type=int, default=4)
+    profiles.add_argument("--force", action="store_true")
+    commands.add_parser("patterns", help="Buyers versus non-buyers, and hot/warm/cold lead groups")
+    swot = commands.add_parser("swot", help="Evidence-backed SWOT for pilot leads that are not confirmed customers")
+    swot.add_argument("--force", action="store_true")
     commands.add_parser("status")
     freeze = commands.add_parser("freeze")
     freeze_action = freeze.add_mutually_exclusive_group()
@@ -143,6 +152,56 @@ def main():
                           "current_consensus": sum(current_consensus(store, c["call_id"]) is not None for c in calls),
                           "current_extractions": sum(current_extraction(store, c["call_id"]) is not None for c in calls),
                           "method_frozen": store.path("method-freeze.json").exists()}, indent=2))
+    elif args.command == "swot":
+        from .client import journeys
+        from .ensemble import GeminiVerifier
+        from .swot import draft_swot
+
+        view = {r["lead_number"]: r for r in read_json(store.path("review", "patterns.json"))["pilot_leads"]}
+        model, failures = GeminiVerifier(store), []
+        targets = [j for lead, j in journeys(store, selected_calls(store, "all")).items() if view[lead]["crm"] != "customer"]
+        for i, journey in enumerate(targets, 1):
+            v = view[journey["lead_number"]]
+            context = (f"Category {v['category']} ({'; '.join(v['reasons'] + v['other_factors'])}); "
+                       f"open concerns: {', '.join(v['open_concerns']) or 'none'}")
+            try:
+                profile = read_json(store.path("review", "profiles", journey["lead_number"] + ".json"))
+                draft_swot(store, journey, profile, context, model, args.force)
+                print(f"{i}/{len(targets)} {journey['lead_alias']} swot OK", flush=True)
+            except Exception as exc:  # noqa: BLE001 -- isolate one failed lead; command still exits nonzero
+                failures.append(journey["lead_alias"])
+                print(f"{i}/{len(targets)} {journey['lead_alias']} FAILED {type(exc).__name__}", flush=True)
+        print(json.dumps({"attempted": len(targets), "failed": len(failures), "failed_leads": failures}), flush=True)
+        if failures:
+            raise SystemExit(1)
+    elif args.command == "patterns":
+        from .patterns import analyse
+        result = analyse(store)
+        print(json.dumps({k: result[k] for k in ("leads", "categories", "later_check")}, indent=2, default=str))
+    elif args.command == "profiles":
+        from concurrent.futures import ThreadPoolExecutor
+
+        from .profile import build_profile, lead_calls
+        from .remote import GeminiExtractor
+        if os.getenv("PILOT_ALLOW_REMOTE") != "1":
+            raise ValueError("Profiles use the hosted model; set PILOT_ALLOW_REMOTE=1")
+        leads = lead_calls(store, args.group)
+        chosen = [lead for lead in leads if not args.leads or lead in args.leads.split(",")][:args.limit]
+        model, failures = GeminiExtractor(store), []
+
+        def one(lead):
+            try:
+                build_profile(store, lead, leads[lead], model, args.force)
+                return lead, "OK"
+            except Exception as exc:  # noqa: BLE001 -- isolate one failed lead; command still exits nonzero
+                failures.append(lead)
+                return lead, f"FAILED {type(exc).__name__}"
+        with ThreadPoolExecutor(args.workers) as pool:
+            for i, (lead, outcome) in enumerate(pool.map(one, chosen), 1):
+                print(f"{i}/{len(chosen)} lead {lead} profile {outcome}", flush=True)
+        print(json.dumps({"attempted": len(chosen), "failed": len(failures), "failed_leads": failures}), flush=True)
+        if failures:
+            raise SystemExit(1)
     elif args.command == "cohort":
         from .cohort import build, freeze
         if args.freeze or args.supersede:

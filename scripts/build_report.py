@@ -18,6 +18,9 @@ def build(root):
         return json.loads((root / "exports" / "client" / (name + ".json")).read_text())
 
     meta, insights, actions = read("meta"), read("sales_insights"), read("lead_actions")
+    optional = lambda name: read(name) if (root / "exports" / "client" / (name + ".json")).exists() else []
+    predictors, groups, who = optional("predictors"), optional("lead_groups"), optional("who_buys")
+    comparison = meta.get("comparison") or {}
     validation = meta.get("validation", {})
     doc = Document()
     section = doc.sections[0]
@@ -69,10 +72,48 @@ def build(root):
     para(datetime.now(ZoneInfo("Asia/Kolkata")).strftime("%d %B %Y")
          + ("  |  Review draft" if meta.get("review_draft") else ""))
     para(meta["scope_note"])
-    para(f"We reviewed 300 recorded calls across 50 leads from the September 2026 call export to answer two "
-         f"questions: what should change in the sales approach, and what should happen next with each lead. "
-         f"This report gives {len(insights)} findings and a recommended next action for each of the "
-         f"{len(actions)} leads. Every finding and action shows the calls, and the moments in them, that it rests on.")
+    para(f"We reviewed 300 recorded calls across 50 leads from the September 2026 call export. To judge which "
+         f"leads are likely to buy, we compared {comparison.get('buyers', 'the')} past customers with "
+         f"{comparison.get('non_buyers', 'a sample of')} randomly chosen leads who had a real sales conversation "
+         f"but did not buy. This report covers which leads to work first, what separates buyers from non-buyers, "
+         f"who buys, and {len(insights)} changes to the sales approach. Every statement shows the calls, and the "
+         f"moments in them, that it rests on.")
+
+    para("Which leads to work first", "Heading 1")
+    table(["Category", "Leads"], Counter(a["category"] for a in actions).most_common())
+    para("Each open lead falls into one group based on what they said in their sales calls, and each group's "
+         "category comes from how similar past leads turned out. The Lead Priorities sheet shows every lead's "
+         "group, how similar past leads turned out with a range, open concerns, a next action and the moments "
+         "in the calls behind it; the Lead SWOT sheet gives an evidence-backed SWOT for each open lead.")
+    for lead in [a for a in actions if a["category"] == "Hot"]:
+        para(f"Lead {lead['lead_identifier']}: Hot", "Heading 2")
+        para(lead["why_this_category"] + " " + lead["similar_past_leads"] + ".", bold_prefix="Why: ")
+        para(lead["recommended_next_action"], bold_prefix="Next action: ")
+        para(lead["suggested_wording"], bold_prefix="Opening question: ")
+
+    if predictors:
+        para("What separates buyers from non-buyers", "Heading 1")
+        para("Only sales conversations before a purchase are compared, so what customers say after buying does not "
+             "count. A factor is marked clear only if the difference survives a correction for testing many factors "
+             "at once. These are associations from past calls, not proof that changing a factor causes a sale.")
+        table(["Factor", "Bought, with it", "Bought, without it", "Strength of the link"],
+              [(f["factor"], f["bought_with_it"], f["bought_without_it"], f["strength"])
+               for f in predictors if f["evidence"] == "Clear"])
+        unclear = [f["factor"].lower() for f in predictors if f["evidence"] != "Clear"]
+        para(f"No clear link was found for the other {len(unclear)} factors, including "
+             + ", ".join(unclear[:6]) + ". In particular, agreeing to a follow-up call did not predict buying.")
+    if groups:
+        para("How the groups held up on later leads", "Heading 1")
+        para("Groups were graded on leads first called from January to May, then checked on different leads first "
+             "called from June to September.")
+        table(["Group", "Category", "Bought, Jan to May", "Bought, Jun to Sep"],
+              [(g["group"], g["category"], g["bought_jan_may"], g["bought_jun_sep"]) for g in groups])
+    if who:
+        para("Who buys", "Heading 1")
+        para("Shares among leads who stated the trait, buyers compared with non-buyers.")
+        table(["Trait", "Value", "Share of buyers", "Share of non-buyers"],
+              [(w["trait"], w["value"], w["share_of_buyers"], w["share_of_non_buyers"]) for w in who
+               if w["trait"] in ("Main reason for the course", "Background", "Experience")])
 
     para("What should change in the sales approach", "Heading 1")
     for index, insight in enumerate(insights, 1):
@@ -84,28 +125,24 @@ def build(root):
         para(insight["how_to_assess"], bold_prefix="How to check it worked: ")
         para(insight["source"], bold_prefix="Source: ")
 
-    para("What to do next with the leads", "Heading 1")
-    table(["Recommended action", "Leads"], Counter(a["action_category"] for a in actions).most_common())
-    para("The Lead Actions sheet lists every lead with a specific next step, an opening question, and the "
-         "recorded moment that supports it. Recommendations reflect the calls as recorded; confirm each lead's "
-         "current status before contacting them.")
-    for action in [a for a in actions if a["action_category"] in
-                   ("Resolve a purchase condition", "Answer a specific concern")][:4]:
-        para(f"Lead {action['lead_identifier']}: {action['action_category']}", "Heading 2")
-        para(action["latest_position"], bold_prefix="Position: ")
-        para(action["recommended_next_action"], bold_prefix="Next action: ")
-        para(action["suggested_wording"], bold_prefix="Opening question: ")
-
     para("How this review was done", "Heading 1")
-    para("Each recording was transcribed by three independent speech-recognition systems. Where they disagreed, the "
-         "passage was checked against the audio. Statements were then taken from the transcript, and each one was "
-         "checked a second time against the words that support it; statements that could not be supported were left "
-         "out. Counts in the findings are of leads and calls in this sample.")
+    para("Each pilot recording was transcribed by three independent speech-recognition systems, and passages where "
+         "they disagreed were checked against the audio. Each comparison recording was transcribed by two systems, "
+         "and a statement whose words the second system did not hear was held back. Statements were then taken "
+         "from the transcript, and each one was checked a second time against the words that support it; "
+         "statements that could not be supported were left out.")
     para("To trace any statement, open the call in the CRM recording for the lead and date shown, and go to the time "
          "given to hear the original words.")
     para("Limits of this review", "Heading 1")
-    for text in [("The calls are a selected sample of leads with several recorded calls, so counts describe this "
-                  "sample, not every TrendyTech lead."),
+    for text in [("Buyers are leads the CRM marks as converted; this was not checked against payment records. Leads "
+                  "with no purchase recorded may still buy."),
+                 ("Purchase dates were not available, so a customer's calls before their first payment, onboarding or "
+                  "support call are treated as before the purchase. Customers whose sales calls predate the export "
+                  "could not be compared on what they said."),
+                 ("Non-buyers are a random sample of 150 of the 1,448 such leads; rates are scaled to that population "
+                  "and the ranges reflect the sample size."),
+                 ("The 50 pilot leads are a selected sample of leads with several recorded calls, so their mix does "
+                  "not describe every TrendyTech lead."),
                  "Recordings are historical. A plan or date mentioned in a call may have changed since.",
                  "CRM conversion flags were not independently verified, and this review does not predict who will buy.",
                  "The approved sales script was not available, so script adherence was not assessed."]:

@@ -8,7 +8,7 @@ from .remote_asr import GEMINI_ASR, LABELLED_ASR, STITCH
 from .remote_sarvam import SARVAM_ASR
 from .resolve import RESOLVER
 from .schema import EVIDENCE_RULES_VERSION
-from .storage import digest, read_json
+from .storage import digest, read_json, write_json
 
 # Method v2 (3 Oct 2026): extraction reads the three-system consensus of Whisper, Gemini Transcribe and Sarvam,
 # with Gemini Pro resolving only stretches where all three disagree.
@@ -66,9 +66,16 @@ def current_labelled(store, call_id):
     labelled, audio = read_json(path), read_json(store.path("audio", call_id + ".json"))
     if labelled.get("fingerprint") != digest([digest([audio["sha256"], LABELLED_ASR]), STITCH]):
         return None
-    return {"call_id": call_id, "source": "gemini_labelled",
-            "fingerprint": digest([labelled["fingerprint"], whisper["fingerprint"], ALIGNMENT]),
-            "segments": timed_segments(labelled["turns"], whisper["segments"]),
+    fingerprint = digest([labelled["fingerprint"], whisper["fingerprint"], ALIGNMENT])
+    # Aligning a long call with Whisper takes a noticeable fraction of a second; the result is cached by fingerprint.
+    cache = store.path("asr", "gemini-labelled-timed", call_id + ".json")
+    cached = read_json(cache) if cache.exists() else None
+    if cached and cached["fingerprint"] == fingerprint:
+        segments = cached["segments"]
+    else:
+        segments = timed_segments(labelled["turns"], whisper["segments"])
+        write_json(cache, {"fingerprint": fingerprint, "segments": segments})
+    return {"call_id": call_id, "source": "gemini_labelled", "fingerprint": fingerprint, "segments": segments,
             "whisper_text": " ".join(s["text"] for s in whisper["segments"]),
             "flags": sorted(set(whisper["flags"]) | set(labelled["flags"])), "duration_seconds": whisper["duration_seconds"]}
 

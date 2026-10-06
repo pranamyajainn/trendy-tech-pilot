@@ -2,7 +2,7 @@
 
 customers: every call of every lead whose calls are all flagged "Is Converted = Yes" in the client export, except
 leads already in the pilot. Leads with mixed flags are left out: the flag is not consistent over their calls.
-open_sample: the non-buyer side of the scoring yardstick. A seeded random 150 of the leads with no "Yes" flag on any
+open_sample: the non-buyer side of the buyer comparison. A seeded random 150 of the leads with no "Yes" flag on any
 call and at least one call of 3+ minutes (a real conversation), outside the pilot, with all their calls. "Not
 converted" means no purchase recorded by the export date, not "will never buy".
 """
