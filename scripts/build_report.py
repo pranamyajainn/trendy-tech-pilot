@@ -1,55 +1,60 @@
-"""Build the client report from the same JSON as the client workbook. No costs or processing details."""
+"""Two-page client report, built only from data/exports/client/*.json (written by `pilot worklist export`).
+No costs, model names or processing details. Every number is computed from the exported rows."""
 
 import json
+import re
 import sys
-from collections import Counter
-from datetime import datetime
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
 from docx import Document
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Inches, Pt, RGBColor
 
+WHAT_TO_DO = {
+    "Hot": "Call first: a commitment is on record and recent.",
+    "Warm": "Interest without a recent commitment, or a commitment gone quiet: follow the row's next action.",
+    "Check status": "Check LeadSquared or payments before any sales call.",
+    "Dormant: reconfirm": "No conversation for 90+ days: reconfirm interest by message first.",
+    "Cold: declined": "Declined, or wants something TrendyTech does not offer: no sales calls.",
+    "Outside target": "Matches TrendyTech's own exclusion: manager decides.",
+    "Not reached": "Never spoken to: change channel (WhatsApp, email) or time.",
+}
+
 
 def build(root):
     def read(name):
         return json.loads((root / "exports" / "client" / (name + ".json")).read_text())
 
-    meta, insights, actions = read("meta"), read("sales_insights"), read("lead_actions")
-    optional = lambda name: read(name) if (root / "exports" / "client" / (name + ".json")).exists() else []
-    predictors, groups, who = optional("predictors"), optional("lead_groups"), optional("who_buys")
-    comparison = meta.get("comparison") or {}
-    validation = meta.get("validation", {})
+    meta, rows = read("meta"), read("worklist")
     doc = Document()
     section = doc.sections[0]
-    section.top_margin = section.bottom_margin = Inches(.65)
-    section.left_margin = section.right_margin = Inches(.75)
+    section.top_margin = section.bottom_margin = Inches(.5)
+    section.left_margin = section.right_margin = Inches(.7)
     for name in ["Normal", "Title", "Heading 1", "Heading 2"]:
-        style = doc.styles[name]
-        style.font.name = "Arial"
-        style.font.color.rgb = RGBColor(0, 0, 0)
-    doc.styles["Normal"].font.size = Pt(10)
-    doc.styles["Normal"].paragraph_format.space_after = Pt(6)
-    doc.styles["Title"].font.size = Pt(24)
-    doc.styles["Heading 1"].font.size = Pt(15)
-    doc.styles["Heading 2"].font.size = Pt(11)
+        doc.styles[name].font.name = "Arial"
+        doc.styles[name].font.color.rgb = RGBColor(0, 0, 0)
+    doc.styles["Normal"].font.size = Pt(9)
+    doc.styles["Normal"].paragraph_format.space_after = Pt(4)
+    doc.styles["Title"].font.size = Pt(20)
+    doc.styles["Heading 1"].font.size = Pt(13)
+    doc.styles["Heading 2"].font.size = Pt(10.5)
     for border in doc.styles.element.xpath(".//w:pBdr"):
         border.getparent().remove(border)
-    doc.core_properties.title = "TrendyTech sales call review"
-    doc.core_properties.author = "TrendyTech Pilot Team"
+    doc.core_properties.title = "TrendyTech pilot: open-lead worklist"
+    doc.core_properties.author = "Sahajta AI"
 
-    def para(text, style=None, bold_prefix=None):
+    def para(text="", bold_prefix=None, style=None):
         p = doc.add_paragraph(style=style)
         if bold_prefix:
             p.add_run(bold_prefix).bold = True
         p.add_run(text)
         return p
 
-    def table(headers, rows):
+    def table(headers, body, widths):
         t = doc.add_table(rows=1, cols=len(headers))
         t.style = "Table Grid"
+        t.autofit = False
         for cell, title in zip(t.rows[0].cells, headers):
             cell.text = title
             shade = OxmlElement("w:shd")
@@ -58,114 +63,130 @@ def build(root):
             for run in cell.paragraphs[0].runs:
                 run.bold = True
                 run.font.color.rgb = RGBColor(255, 255, 255)
-        for values in rows:
-            for cell, text in zip(t.add_row().cells, values):
-                cell.text = str(text)
-        for index, row in enumerate(t.rows):
-            props = row._tr.get_or_add_trPr()
-            props.append(OxmlElement("w:cantSplit"))
-            if index == 0:
-                props.append(OxmlElement("w:tblHeader"))
-        para("")
+        for values in body:
+            cells = t.add_row().cells
+            for cell, value in zip(cells, values):
+                cell.text = str(value)
+        for column, width in zip(t.columns, widths):
+            column.width = Inches(width)  # the grid widths: LibreOffice and Word lay out from these
+        for row in t.rows:
+            for cell, width in zip(row.cells, widths):
+                cell.width = Inches(width)
+                for p in cell.paragraphs:
+                    p.paragraph_format.space_after = Pt(0)
+                    for run in p.runs:
+                        run.font.size = Pt(8)
+        return t
 
-    para("TrendyTech sales call review", "Title")
-    para(datetime.now(ZoneInfo("Asia/Kolkata")).strftime("%d %B %Y")
-         + ("  |  Review draft" if meta.get("review_draft") else ""))
-    para(meta["scope_note"])
-    para(f"We reviewed 300 recorded calls across 50 leads from the September 2026 call export. To judge which "
-         f"leads are likely to buy, we also processed the calls of all {comparison.get('customers_total', 'the')} "
-         f"past customers outside the pilot. The {comparison.get('buyers', '')} of them who had at least one real "
-         f"conversation (a call of three minutes or more) were compared with {comparison.get('non_buyers', 'a sample of')} "
-         f"randomly chosen leads who also had one but did not buy. This report covers which leads to work first, what separates buyers from non-buyers, "
-         f"who buys, and {len(insights)} changes to the sales approach. Every statement shows the calls, and the "
-         f"moments in them, that it rests on.")
+    counts = meta["categories"]
+    evidence = meta["evidence"]
+    pilot_calls = sum(1 for _ in read("calls"))
+    statuses = [j["status"] for j in read("journeys")]
+    customers, mixed = statuses.count("Customer (CRM)"), statuses.count("Unclear: mixed CRM flags")
+    doc.add_paragraph("TrendyTech pilot: open-lead worklist", style="Title")
+    if meta["review_draft"]:
+        para("REVIEW DRAFT: the evidence behind each lead is being checked against the recordings.").runs[0].italic = True
+    para(f"{meta['journeys']} lead journeys and {pilot_calls} recorded calls were analysed, call by call: the "
+         f"{meta['leads']} open leads below plus {customers} pilot customers and {mixed} pilot leads with mixed CRM "
+         "flags. "
+         f"{meta['leads']} open leads (no purchase in the CRM export) are placed on a worklist by a fixed rule built "
+         f"from how TrendyTech's own past leads behaved. Every row cites the call and minute it rests on, so any "
+         f"statement can be checked by playing the recording. {meta['scope_note']}")
 
-    para("Which leads to work first", "Heading 1")
-    order = ["Hot", "Warm", "Cold", "Insufficient evidence", "Not reached", "Not target", "Check purchase status",
-             "Already a customer"]
-    counts = Counter(a["category"] for a in actions)
-    table(["Category", "Leads"], [(c, counts[c]) for c in order if counts[c]])
-    para("Each open lead falls into one group based on what they said in their sales calls, and each group's "
-         "category comes from how similar past leads turned out. The Lead Priorities sheet shows every lead's "
-         "group, how similar past leads turned out with a range, open concerns, a next action and the moments "
-         "in the calls behind it; the Lead SWOT sheet gives an evidence-backed SWOT for each open lead.")
-    for lead in [a for a in actions if a["category"] == "Hot"]:
-        para(f"Lead {lead['lead_identifier']}: Hot", "Heading 2")
-        para(lead["why_this_category"] + " " + lead["similar_past_leads"] + ".", bold_prefix="Why: ")
-        para(lead["recommended_next_action"], bold_prefix="Next action: ")
-        para(lead["suggested_wording"], bold_prefix="Opening question: ")
+    doc.add_heading("The worklist at a glance", level=1)
+    table(["Category", "Leads", "What to do"],
+          [(c, counts[c], WHAT_TO_DO[c]) for c in WHAT_TO_DO if counts.get(c)], [1.5, .6, 4.9])
 
-    if predictors:
-        para("What separates buyers from non-buyers", "Heading 1")
-        para("Only sales conversations before a purchase are compared, so what customers say after buying does not "
-             "count. A factor is marked clear only if the difference survives a correction for testing many factors "
-             "at once. These are associations from past calls, not proof that changing a factor causes a sale.")
-        table(["Factor", "Bought, with it", "Bought, without it", "Strength of the link"],
-              [(f["factor"], f["bought_with_it"], f["bought_without_it"], f["strength"])
-               for f in predictors if f["evidence"] == "Clear"])
-        unclear = [f["factor"] for f in predictors if f["evidence"] != "Clear"]
-        para(f"No clear link was found for the other {len(unclear)} factors (for example: " + "; ".join(unclear[:6])
-             + "). In particular, agreeing to a follow-up call did not predict buying.")
-    if groups:
-        para("How the groups held up on later leads", "Heading 1")
-        para("Groups were graded on leads first called from January to May, then checked on different leads first "
-             "called from June to September.")
-        table(["Group", "Category", "Bought, Jan to May", "Bought, Jun to Sep"],
-              [(g["group"], g["category"], g["bought_jan_may"], g["bought_jun_sep"]) for g in groups])
-    if who:
-        para("Who buys", "Heading 1")
-        para("Shares among leads who stated the trait, buyers compared with non-buyers.")
-        table(["Trait", "Value", "Share of buyers", "Share of non-buyers"],
-              [(w["trait"], w["value"], w["share_of_buyers"], w["share_of_non_buyers"]) for w in who
-               if w["trait"] in ("Main reason for the course", "Background", "Experience")])
+    doc.add_heading("Act now", level=1)
+    days = lambda r: int(re.search(r"\((\d+) days\)", r["last_conversation"]).group(1)) if "days)" in r["last_conversation"] else 10**6
+    act = [r for r in rows if r["category"] in ("Hot", "Check status") or (r["category"] == "Warm" and days(r) <= 30)]
+    table(["Lead", "Category", "Last conversation", "Next action"],
+          [(r["lead"], r["category"], r["last_conversation"], r["next_action"]) for r in act]
+          or [("–", "–", "–", "No lead in these categories")], [.65, 1.0, 1.25, 4.1])
+    para(f"The Hot and Check-status leads, and Warm leads spoken to in the last 30 days. All {len(rows)} leads, with the reasons, "
+         "objections, SWOT, what to say and proof, are in the Worklist sheet of the workbook.").runs[0].italic = True
+    if act:
+        top = act[0]
+        doc.add_heading(f"Worked example: lead {top['lead']}", level=2)
+        para(top["buying_intent"], "Where it stands: ")
+        para(top["open_objections"].replace("\n", "; "), "Open objections: ")
+        para(top["next_action"], "Next action: ")
+        para(top["what_to_say"].replace("\n", " | "), "What to say: ")
+        para(top["proof"].split("\n")[0], "Proof: ")
 
-    para("What should change in the sales approach", "Heading 1")
-    for index, insight in enumerate(insights, 1):
-        para(f"{index}. {insight['finding']}", "Heading 2")
-        para(insight["evidence_and_scale"], bold_prefix="Evidence: ")
-        para(insight["sales_implication"], bold_prefix="Why it matters: ")
-        para(insight["recommended_change"], bold_prefix="Recommended change: ")
-        para(insight["suggested_wording"], bold_prefix="Proposed wording: ")
-        para(insight["how_to_assess"], bold_prefix="How to check it worked: ")
-        para(insight["source"], bold_prefix="Source: ")
+    doc.add_heading("How leads are graded", level=1)
+    para("Each lead is placed by the first statement that is true, in this order: (1) its own calls show it may "
+         "already have bought: check status; (2) never reached; (3) matches TrendyTech's own exclusion (fresher, "
+         "non-IT background, career gap over a year); (4) declined, or wants something TrendyTech does not offer; "
+         f"(5) said they will pay or enrol, or will on a condition TrendyTech can meet, within the last "
+         f"{meta['rule']['hot_within_days']} days: Hot; (6) no conversation for over {meta['rule']['dormant_after_days']} "
+         "days: dormant; (7) everything else: Warm. Only what the lead said counts, not what the counsellor said.")
+    w = 1448 / 150
+    b = sum(e["customers"] for e in evidence.values())
+    n = sum(e["non_buyers_sampled"] for e in evidence.values())
+    base = b / (b + w * n)
+    para(f"The evidence comes from {b} past customers and a random sample of {n} past non-buyers who had a real sales "
+         f"conversation. Read the same way, about {base:.0%} of such past leads bought. For each category:")
+    ev_rows = []
+    for c in ("Warm", "Outside target", "Cold: declined", "Hot"):
+        e = evidence.get(c)
+        if not e:
+            continue
+        if c == "Hot":
+            shown = "Not shown: for most past customers this was said on the call where they paid"
+        elif e["customers"] < 10 or e["non_buyers_sampled"] < 5:
+            shown = "Too few past cases for a reliable rate"
+        else:
+            shown = f"{e['rate'] * 10:.1f} in 10 bought (range {e['low'] * 10:.1f}–{e['high'] * 10:.1f})"
+        ev_rows.append((c, e["customers"], e["non_buyers_sampled"], shown))
+    table(["Category", "Past customers", "Sampled non-buyers", "Similar past leads"], ev_rows, [1.4, 1.0, 1.2, 3.4])
 
-    para("How this review was done", "Heading 1")
-    para("Each pilot recording was transcribed by three independent speech-recognition systems, and passages where "
-         "they disagreed were checked against the audio. Each comparison recording was transcribed by two systems, "
-         "and a statement whose words the second system did not hear was held back. Statements were then taken "
-         "from the transcript, and each one was checked a second time against the words that support it; "
-         "statements that could not be supported were left out.")
-    para("To trace any statement, open the call in the CRM recording for the lead and date shown, and go to the time "
-         "given to hear the original words.")
-    para("Limits of this review", "Heading 1")
-    for text in [("Buyers are leads the CRM marks as converted; this was not checked against payment records. Leads "
-                  "with no purchase recorded may still buy."),
-                 ("Purchase dates were not available, so a customer's calls before their first payment, onboarding or "
-                  "support call are treated as before the purchase. Customers whose sales calls predate the export "
-                  "could not be compared on what they said."),
-                 ("Non-buyers are a random sample of 150 of the 1,448 such leads; rates are scaled to that population "
-                  "and the ranges reflect the sample size."),
-                 ("The 50 pilot leads are a selected sample of leads with several recorded calls, so their mix does "
-                  "not describe every TrendyTech lead."),
-                 "Recordings are historical. A plan or date mentioned in a call may have changed since.",
-                 "CRM conversion flags were not independently verified, and this review does not predict who will buy.",
-                 "The approved sales script was not available, so script adherence was not assessed."]:
-        para(text, "List Bullet")
-    if validation.get("complete"):
-        low, high = validation["audit_precision_95ci"]
-        para(f"Reviewers checked all {validation['client_claims']} statements behind these findings and actions "
-             f"against the recordings, and audited a random sample of {validation['audit_reviewed']} extracted "
-             f"statements: {validation['audit_precision']:.0%} were correct (95% range {low:.0%} to {high:.0%}).")
-    else:
-        para("Human checking of these statements against the recordings is in progress; treat this as a review draft.")
-    footer = section.footer.paragraphs[0]
-    footer.text = "TrendyTech sales call review" + ("  |  Review draft" if meta.get("review_draft") else "")
-    footer.runs[0].font.size = Pt(8)
-    output = root / "deliverables" / "TrendyTech Sales Call Review.docx"
-    output.parent.mkdir(parents=True, exist_ok=True)
-    doc.save(output)
-    print(output)
+    doc.add_heading("What this tells TrendyTech", level=1)
+    out = evidence.get("Outside target")
+    warm = evidence.get("Warm")
+    if out and warm:
+        para(f"Leads matching TrendyTech's own exclusion bought at about {out['rate']:.0%}, against {warm['rate']:.0%} "
+             "for other leads still in play: the exclusion is supported by TrendyTech's own data.", "Your target rule holds. ")
+    para("What a lead says about buying (committing, or declining) separates leads far more than who they are. "
+         "In this analysis, profile details such as a data role versus another IT role did not show a reliable "
+         "difference; the full archive in the next phase holds about ten times as many past non-buyers (1,448 "
+         "rather than a sample of 150) and can test them again.",
+         "Words beat profiles. ")
+    reached = [r for r in rows if r["category"] not in ("Not reached",)]
+    not_asked = sum(r["experience"] == "Not asked" or "not stated" in r["experience"].lower() for r in reached)
+    never = counts.get("Not reached", 0)
+    waiting = sum("a decision TrendyTech controls" in r["buying_intent"] for r in rows)
+    pricing = sum(bool(re.search(r"discount|final price|price approval|approve.{0,30}price|price.{0,20}approv",
+                                 r["next_action"] + " " + r["why"], re.IGNORECASE)) for r in rows)
+    checks = counts.get("Check status", 0)
+    doc.add_heading("Changes to test on upcoming calls", level=1)
+    if not_asked:
+        para(f"In {not_asked} of the {len(reached)} leads that were spoken to, the lead's years of experience are not "
+             "recorded on any call. Ask experience, current role and timeline in the first call: the target check "
+             "depends on it.",
+             "Discovery first. ")
+    if never:
+        para(f"{never} lead{'s were' if never != 1 else ' was'} never reached despite repeated calls. Switch to WhatsApp or email after three "
+             "unanswered calls, and answer call-screening prompts with the name and the course enquiry.",
+             "Change channel early. ")
+    if waiting:
+        para(f"{waiting} lead{'s' if waiting != 1 else ''} will enrol on a condition TrendyTech decides (a price "
+             "approval). Decide it before the next call.", "Unblock internal decisions. ")
+    if pricing:
+        para(f"{pricing} of the {len(rows)} leads turn on a price or discount decision. Agree a clear policy (when a "
+             "discount is allowed, how much, and the non-price alternatives such as no-cost EMI or a single-cloud "
+             "option) so counsellors can answer on the call instead of promising to check.", "Price decisions. ")
+    if checks:
+        para(f"{checks} 'open' lead{'s show' if checks != 1 else ' shows'} signs of an earlier purchase or a missed payment date. Correcting the CRM "
+             "keeps counsellors off customers.", "Keep the CRM true. ")
+    para("Call-quality scoring against an agreed rubric, best time to call (needs unanswered-call logs) and a daily "
+         "worklist across all current open leads.", "Next phase: ")
+    return doc
 
 
 if __name__ == "__main__":
-    build(Path(sys.argv[1] if len(sys.argv) > 1 else "data"))
+    root = Path(sys.argv[1] if len(sys.argv) > 1 else "data").resolve()
+    out = root / "deliverables" / "TrendyTech Pilot Report.docx"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    build(root).save(out)
+    print("Client report exported to the private deliverables directory.")

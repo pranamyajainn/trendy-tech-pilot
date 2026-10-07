@@ -141,7 +141,8 @@ def wilson_interval(successes, n, z=1.96):
 
 
 def validation_status(store):
-    """Signed reviewer verdicts on client claims and on the random holdout claim sample."""
+    """Signed verdicts on the random held-out claim sample (the worklist's own play-and-sign sheet is tracked by
+    `pilot worklist export`)."""
     def rows(name):
         path = store.path("qa", name)
         if not path.exists():
@@ -150,16 +151,12 @@ def validation_status(store):
             return list(csv.DictReader(handle))
 
     signed = lambda r: r.get("reviewer") and r.get("reviewed_at")
-    client = rows("validate-client-claims.csv")
     sample = rows("audit-claims-sample.csv")
     audit = [r for r in sample if signed(r) and r.get("correct", "").strip().lower() in ("yes", "no")]
     correct = sum(r["correct"].strip().lower() == "yes" for r in audit)
-    client_signed = [r for r in client if signed(r) and r.get("verdict")]
-    return {"client_claims": len(client), "client_claims_reviewed": len(client_signed),
-            "client_claims_confirmed": sum(r["verdict"].strip().lower() == "confirmed" for r in client_signed),
-            "audit_reviewed": len(audit), "audit_correct": correct,
+    return {"audit_reviewed": len(audit), "audit_correct": correct,
             "audit_precision": correct / len(audit) if audit else None,
             "audit_precision_95ci": wilson_interval(correct, len(audit)),
             "audit_sample": len(sample),
             # The sample holds up to 100 claims (fewer only if the held-out calls have fewer); all must be reviewed.
-            "complete": bool(client) and len(client_signed) == len(client) and len(audit) == len(sample) > 0}
+            "complete": len(audit) == len(sample) > 0}

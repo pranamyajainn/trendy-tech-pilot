@@ -15,7 +15,10 @@ from .storage import digest, read_json, write_json
 DEFINITIONS = {"customers": "All calls of leads whose every exported call is flagged Is Converted = Yes, "
                             "excluding leads in the pilot selection",
                "open_sample": "All calls of a seeded random 150 leads with no Yes flag and a call of 3+ minutes, "
-                              "excluding leads in the pilot selection"}
+                              "excluding leads in the pilot selection",
+               # Phase 1: everything not yet processed. Whole leads only, so every journey stays complete.
+               "archive": "All calls of every lead in the export that is not in the pilot selection or in an "
+                          "existing cohort (customers, open_sample)"}
 OPEN_SAMPLE_SIZE, OPEN_MIN_SECONDS = 150, 180
 
 
@@ -27,7 +30,11 @@ def build(store, name="customers"):
     leads = defaultdict(list)
     for call in calls:
         leads[call["lead_number"]].append(call)
-    if name == "customers":
+    if name == "archive":
+        taken = {c["lead_number"] for other in ("customers", "open_sample") if store.path("cohorts", other + ".json").exists()
+                 for c in read_json(store.path("cohorts", other + ".json"))["calls"]}
+        keep = lambda group: group[0]["lead_number"] not in taken
+    elif name == "customers":
         keep = lambda group: all(c["crm_conversion_flag"] == "Yes" for c in group)
     else:
         keep = lambda group: (all(c["crm_conversion_flag"] != "Yes" for c in group)
@@ -40,10 +47,15 @@ def build(store, name="customers"):
     for index, lead in enumerate(chosen, 1):
         group = sorted(leads[lead], key=lambda c: (c["created_on"], c["call_id"]))
         for number, call in enumerate(group, 1):
-            records.append({**call, "lead_alias": f"{'K' if name == 'customers' else 'N'}{index:03d}",
+            # Existing cohorts keep their three-digit aliases: a changed record would break their frozen hash.
+            alias = f"A{index:05d}" if name == "archive" else f"{'K' if name == 'customers' else 'N'}{index:03d}"
+            records.append({**call, "lead_alias": alias,
                             "call_number_in_export": number, "split": name,
-                            "journey_outcome_label": ("CRM reported converted; unverified" if name == "customers"
-                                                      else "No conversion recorded by the export date"),
+                            "journey_outcome_label": ("CRM reported converted; unverified"
+                                                      if all(c["crm_conversion_flag"] == "Yes" for c in group)
+                                                      else "No conversion recorded by the export date"
+                                                      if all(c["crm_conversion_flag"] != "Yes" for c in group)
+                                                      else "Mixed CRM flags; unresolved"),
                             "available_calls_for_lead": len(group)})
     manifest = {"name": name, "definition": DEFINITIONS[name], "source_sha256": read_json(store.path("source.json"))["sha256"],
                 "sha256": digest(records), "calls": records}

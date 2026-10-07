@@ -12,8 +12,8 @@ const [overview, worklist, calls, evidence, profiles, objectionSummary, signalSu
 const clientMeta = JSON.parse(await fs.readFile(path.join(root, 'exports', 'client', 'meta.json'), 'utf8'));
 const v = clientMeta.validation;
 const validation = v.complete
-  ? `Complete: ${v.client_claims} client statements signed; audit precision ${(v.audit_precision * 100).toFixed(0)}% of ${v.audit_reviewed} (95% interval ${v.audit_precision_95ci.map(x => (x * 100).toFixed(0) + '%').join(' to ')})`
-  : `Pending: ${v.client_claims_reviewed} of ${v.client_claims} client statements and ${v.audit_reviewed} of ${v.audit_sample} audit claims reviewed. Client files stay labelled Review draft.`;
+  ? `Complete: ${clientMeta.hand_check.claims} worklist claims signed; audit precision ${(v.audit_precision * 100).toFixed(0)}% of ${v.audit_reviewed} (95% interval ${v.audit_precision_95ci.map(x => (x * 100).toFixed(0) + '%').join(' to ')})`
+  : `Pending: ${clientMeta.hand_check.signed} of ${clientMeta.hand_check.claims} worklist claims and ${v.audit_reviewed} of ${v.audit_sample} audit claims reviewed. Client files stay labelled Review draft.`;
 const methodCost = await fs.readFile(path.join(root, 'review', 'method-cost.json'), 'utf8').then(JSON.parse, () => null);
 const workbook = Workbook.create();
 const safe = value => {
@@ -95,12 +95,9 @@ table('Processing costs', Object.entries(overview.costs).map(([item, value]) => 
 workbook.recalculate();
 const inspection = await workbook.inspect({kind: 'region', sheetId: 'Pilot readout', range: 'A1:B12', maxChars: 1800});
 console.log(inspection.ndjson);
-const out = path.join(root, 'deliverables');
+const out = path.join(root, 'deliverables', 'internal');
 await fs.mkdir(out, {recursive: true});
-for (const sheetName of ['Pilot readout', 'Worklist', 'Journey review', 'Lead profiles', 'Calls', 'Objection summary', 'Signal summary', 'Review queue', 'Evidence', 'Processing costs']) {
-  const preview = await workbook.render({sheetName, range: sheetName === 'Pilot readout' ? 'A1:B18' : sheetName === 'Processing costs' ? 'A1:B12' : 'A1:F7', scale: 1, format: 'png'});
-  await fs.writeFile(path.join(out, 'internal-preview-' + sheetName.replaceAll(' ', '-') + '.png'), new Uint8Array(await preview.arrayBuffer()));
-}
 const output = await SpreadsheetFile.exportXlsx(workbook);
 await output.save(path.join(out, 'TrendyTech Pilot Internal Workbook.xlsx'));
+await fs.rm(path.join(out, 'TrendyTech Pilot Internal Workbook.xlsx.inspect.ndjson'), {force: true});
 console.log('Workbook exported to local private deliverables directory.');

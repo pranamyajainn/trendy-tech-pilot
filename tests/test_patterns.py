@@ -60,3 +60,16 @@ def test_client_exclusions_are_named():
 def test_conversion_rate_scales_the_non_buyer_sample_to_its_population():
     rate, (low, high) = patterns.conversion_rate(b=100, o=10, sample_size=100, population=1000)
     assert rate == pytest.approx(100 / (100 + 10 * 10)) and low < rate < high
+
+
+def test_conversion_rate_interval_counts_noise_on_both_sides():
+    # 260 buyers vs 144 of 150 sampled non-buyers (of 1,448): the base rate is about 16%, range about 13-19%.
+    rate, (low, high) = patterns.conversion_rate(b=260, o=144, sample_size=150, population=1448)
+    assert rate == pytest.approx(0.1576, abs=1e-3)
+    assert low == pytest.approx(0.132, abs=2e-3) and high == pytest.approx(0.187, abs=2e-3)
+
+
+def test_conversion_rate_handles_empty_cells():
+    assert patterns.conversion_rate(0, 0, 150, 1448) == (None, None)
+    rate, (low, high) = patterns.conversion_rate(0, 5, 150, 1448)
+    assert rate == 0 and 0 < low < high < 0.2  # wide: five sampled non-buyers say little

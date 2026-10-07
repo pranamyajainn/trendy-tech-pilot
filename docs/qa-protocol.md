@@ -25,17 +25,18 @@ proves accuracy.
 
 ## Human validation (required before the "Review draft" label is removed)
 
-`pilot client` writes two reviewer sheets. A reviewer opens each recording at the time shown and signs every row
-with `reviewer` and `reviewed_at`. Unsigned rows are not counted.
+Two reviewer sheets. A reviewer opens each recording at the time shown and signs every row with `reviewer` and
+`reviewed_at`. Unsigned rows are not counted.
 
-1. `data/qa/validate-client-claims.csv`: every statement the client sheets rely on (finding examples and each
-   lead's supporting evidence). Set `verdict` to Confirmed, Corrected or Removed. Corrections to a lead action go
-   in `data/review/lead-action-edits.json` (field, new text and reason), which `pilot client` applies; finding
-   text lives in `data/review/sales-insights.json`.
-2. `data/qa/audit-claims-sample.csv`: a seeded random sample of up to 100 extracted claims from the held-out
-   calls, which were never used to tune the method. Set `correct` to yes or no and note the problem.
+1. `data/qa/worklist-review.csv` (written by `pilot worklist export`): every claim behind a Hot, Warm or
+   Check-status worklist row. Set `verdict` to Confirmed, Corrected or Removed. Fix a wrong claim in the lead's
+   coded file (`data/review/worklist/<lead>.json`), then run `pilot worklist check` and `export` again.
+2. `data/qa/audit-claims-sample.csv` (written by `pilot qa`): a seeded random sample of up to 100 extracted
+   claims from the held-out calls, which were never used to tune the method. Set `correct` to yes or no and note
+   the problem.
 
-Validation is complete when every client statement is signed and the whole audit sample is reviewed. The
+Validation is complete when both sheets are fully signed; `pilot worklist export` then drops the REVIEW DRAFT
+label. The
 client report then states audit precision with its Wilson 95% interval and denominator. This measures whether
 extracted claims are correct, not how much information the method missed; note omissions in `note`.
 

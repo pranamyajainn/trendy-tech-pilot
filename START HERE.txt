@@ -1,32 +1,16 @@
-TRENDYTECH PILOT — WORKING FOLDER
+TRENDYTECH PILOT - WORKING FOLDER
 
-Start with README.md for the pipeline and current limitations.
+Start with docs/pipeline/README.md: how the pipeline works, how to rebuild every output, how to run Phase 1 and 2.
 
 WHERE TO LOOK
-- data/source/          Original proposal and client Excel copies
-- data/audio/           300 recordings and download metadata
-- data/transcripts/     Timestamped local transcripts
-- data/selection.json   The selected 300 calls across 50 leads
-- data/experiments/     Local-model trials, kept out of client results
-- data/qa/              Review templates and development review notes
-- data/exports/         Current JSON and CSV exports
-- data/deliverables/    DRAFT Excel workbook and Word report; not ready for clients
-- data/ledger.jsonl     Processing time and API usage ledger
-- src/                 Pipeline code
-- scripts/             Export tools and calibration experiments
-- tests/               Automated checks
-- docs/                Pilot scope, quality protocol, and model evaluation
-- .env                 Private API settings; hidden in Finder by default
-
-CURRENT STATE — 3 OCTOBER 2026
-300 recordings downloaded. 238 development recordings transcribed.
-62 held-out calls reserved for evaluation after the method is frozen.
-Extraction calibration has not passed. Draft outputs are not final findings.
-Paid text extraction is approved up to a INR 500 processing cap, pending a local API key.
-
-SHARED DEPENDENCIES
-Model weights remain in the standard Hugging Face cache under
-~/.cache/huggingface/hub/; they are not duplicated in this folder.
-The Python environment is in .venv/. The document runtime is provided by Codex.
-
-Client data, recordings, drafts and .env are excluded from the public Git repository.
+- data/deliverables/    Client workbook and report (current); internal/ holds the gate note and method review
+- data/qa/              Sheets to play and sign before sharing (worklist-review.csv, audit-claims-sample.csv)
+- data/phase0-pilot/    Every lead in one place: recordings, readable transcripts, analyses
+- data/review/          Coded leads (worklist/), profiles, frozen worklist rule
+- data/audio/           Recordings (keep: needed to play cited minutes and to re-transcribe)
+- data/asr/, transcripts/, extractions/, superseded/, experiments/, quarantine/   Paid or computed outputs (keep)
+- data/source/          Proposal and client export copies
+- data/research/        Parameter research, method council, review scripts; archive/ holds old notes and run logs
+- data/ledger.jsonl     Every processing attempt with time and API spend
+- src/, scripts/, tests/, docs/   Code, builders, tests, documentation
+- .env                  Private API settings (hidden in Finder by default; never share)

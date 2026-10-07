@@ -1,14 +1,14 @@
-// Client workbook: two decision sheets, no costs, model names or processing details.
-// Run with the Codex bundled Node runtime and @oai/artifact-tool via node_modules. Output stays in ignored data/.
+// Client workbook: the three sheets the proposal promises for the pilot (worklist, lead journeys, call data).
+// No costs, model names or processing details. Input: data/exports/client/{meta,worklist,journeys,calls}.json,
+// written by `pilot worklist export`. Run with the Codex bundled Node runtime and @oai/artifact-tool via
+// node_modules. Output stays in ignored data/deliverables/.
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { Workbook, SpreadsheetFile } from '@oai/artifact-tool';
 
 const root = path.resolve(process.argv[2] || 'data');
 const read = async name => JSON.parse(await fs.readFile(path.join(root, 'exports', 'client', name + '.json'), 'utf8'));
-const optional = name => read(name).catch(() => []);
-const [meta, insights, actions] = await Promise.all(['meta', 'sales_insights', 'lead_actions'].map(read));
-const [swot, predictors, groups, who, customers] = await Promise.all(['lead_swot', 'predictors', 'lead_groups', 'who_buys', 'customer_profiles'].map(optional));
+const [meta, worklist, journeys, calls] = await Promise.all(['meta', 'worklist', 'journeys', 'calls'].map(read));
 const workbook = Workbook.create();
 const safe = value => {
   if (value == null) return '';
@@ -19,13 +19,17 @@ const col = n => {
   for (n++; n > 0; n = Math.floor((n - 1) / 26)) label = String.fromCharCode(65 + (n - 1) % 26) + label;
   return label;
 };
+const CATEGORY_FILL = {
+  'Hot': '#F8D7DA', 'Warm': '#FDEBD0', 'Check status': '#D6E4F5', 'Dormant: reconfirm': '#E9ECEF',
+  'Cold: declined': '#E2E3E5', 'Outside target': '#EFEFEF', 'Not reached': '#F4F4F4',
+};
 
-function sheet(name, title, rows, columns, subtitle = '') {
+function sheet(name, title, rows, columns, subtitle) {
   const ws = workbook.worksheets.add(name);
   ws.showGridLines = false;
   ws.getCell(0, 0).values = [[title]];
   ws.getCell(0, 0).format.font = {name: 'Arial', size: 14, bold: true};
-  ws.getCell(1, 0).values = [[(meta.review_draft ? 'REVIEW DRAFT. ' : '') + meta.scope_note + (subtitle ? ' ' + subtitle : '')]];
+  ws.getCell(1, 0).values = [[(meta.review_draft ? 'REVIEW DRAFT. ' : '') + meta.scope_note + ' ' + subtitle]];
   ws.getCell(1, 0).format.font = {name: 'Arial', size: 10, italic: true, color: '#5A6B7B'};
   const keys = columns.map(c => c.key);
   const matrix = [columns.map(c => c.label), ...rows.map(row => keys.map(k => safe(row[k])))];
@@ -43,94 +47,57 @@ function sheet(name, title, rows, columns, subtitle = '') {
     // Explicit heights from the longest wrapped cell: autofit undersizes some rows, which clips the last line.
     rows.forEach((row, r) => {
       const lines = Math.max(...columns.map(c => String(row[c.key] ?? '').split('\n')
-        .reduce((n, part) => n + Math.max(1, Math.ceil(part.length / (c.width * 1.05))), 0)));
-      ws.getRangeByIndexes(4 + r, 0, 1, keys.length).format.rowHeight = lines * 13.5 + 8;
+        .reduce((n, part) => n + Math.max(1, Math.ceil(part.length / (c.width * 1.2))), 0)));
+      ws.getRangeByIndexes(4 + r, 0, 1, keys.length).format.rowHeight = Math.min(409, lines * 13.5 + 8);
     });
   }
   ws.freezePanes.freezeRows(4);
+  return ws;
 }
 
-sheet('Lead Priorities', 'Which leads to work first', actions, [
-  {key: 'lead_identifier', label: 'Lead identifier', width: 13},
-  {key: 'assigned_owner', label: 'Assigned owner', width: 18},
-  {key: 'category', label: 'Category', width: 14},
-  {key: 'why_this_category', label: 'Why this category', width: 40},
-  {key: 'similar_past_leads', label: 'How similar past leads turned out', width: 30},
-  {key: 'open_concerns', label: 'Open concerns', width: 20},
-  {key: 'last_sales_conversation', label: 'Last sales conversation', width: 14},
-  {key: 'recommended_next_action', label: 'Recommended next action', width: 44},
-  {key: 'suggested_wording', label: 'Suggested question or wording', width: 40},
-  {key: 'timing_status_check', label: 'Timing / status check', width: 32},
-  {key: 'supporting_evidence', label: 'Supporting evidence', width: 46},
-], 'Categories come from groups of past leads with known outcomes; see Lead Groups.');
-if (swot.length) sheet('Lead SWOT', 'Opportunity SWOT for each open lead', swot, [
-  {key: 'lead_identifier', label: 'Lead identifier', width: 13},
-  {key: 'category', label: 'Category', width: 14},
-  {key: 'summary', label: 'Summary', width: 40},
-  {key: 'strengths', label: 'Strengths', width: 40},
-  {key: 'weaknesses', label: 'Weaknesses', width: 40},
-  {key: 'opportunities', label: 'Opportunities', width: 40},
-  {key: 'threats', label: 'Threats', width: 40},
-], 'Every point cites a moment in the lead\'s own calls.');
-if (predictors.length) sheet('What Predicts Buying', 'What separates buyers from non-buyers', predictors, [
-  {key: 'factor', label: 'Factor', width: 34},
-  {key: 'buyers_with_it', label: 'Buyers with it', width: 14},
-  {key: 'non_buyers_with_it', label: 'Non-buyers with it', width: 14},
-  {key: 'bought_with_it', label: 'Bought, with it', width: 12},
-  {key: 'bought_without_it', label: 'Bought, without it', width: 12},
-  {key: 'difference', label: 'Difference', width: 12},
-  {key: 'strength', label: 'Strength of the link', width: 30},
-  {key: 'evidence', label: 'Evidence', width: 22},
-], 'Sales calls before purchase only. "Clear" survives a correction for testing many factors; links are associations, not causes.');
-if (groups.length) sheet('Lead Groups', 'How each group of past leads turned out', groups, [
-  {key: 'group', label: 'Group', width: 16},
-  {key: 'meaning', label: 'Meaning', width: 40},
-  {key: 'category', label: 'Category', width: 14},
-  {key: 'bought_jan_may', label: 'Bought, leads first called Jan-May (range)', width: 26},
-  {key: 'leads_jan_may', label: 'Leads, Jan-May', width: 10},
-  {key: 'bought_jun_sep', label: 'Bought, leads first called Jun-Sep (range)', width: 26},
-  {key: 'leads_jun_sep', label: 'Leads, Jun-Sep', width: 10},
-], 'Graded on Jan-May leads and checked on later, different leads (Jun-Sep). Hot or Cold means the range lies above or below the average.');
-if (who.length) sheet('Who Buys', 'Who buys, compared with who does not', who, [
-  {key: 'trait', label: 'Trait', width: 26},
-  {key: 'value', label: 'Value', width: 36},
-  {key: 'share_of_buyers', label: 'Share of buyers', width: 16},
-  {key: 'share_of_non_buyers', label: 'Share of non-buyers', width: 18},
-], 'Shares of leads where the trait was stated.');
-if (customers.length) sheet('Customer Profiles', 'What each past customer said about themselves', customers, [
-  {key: 'lead_identifier', label: 'Lead identifier', width: 13},
+const ws = sheet('Worklist', 'Open leads: who to call, why, and what to say', worklist, [
+  {key: 'lead', label: 'Lead', width: 9},
+  {key: 'category', label: 'Category', width: 13},
+  {key: 'why', label: 'Why this category', width: 30},
+  {key: 'past_leads_like_this', label: 'Similar past leads (evidence)', width: 26},
+  {key: 'last_conversation', label: 'Last conversation', width: 14},
+  {key: 'buying_intent', label: 'Buying intent', width: 34},
+  {key: 'experience', label: 'Experience', width: 16},
+  {key: 'role', label: 'Current role', width: 20},
+  {key: 'ctc', label: 'CTC', width: 11},
+  {key: 'location', label: 'Location', width: 12},
+  {key: 'open_objections', label: 'Open objections', width: 36},
+  {key: 'swot', label: 'Opportunity SWOT (S, W, O, T)', width: 44},
+  {key: 'next_action', label: 'Next action', width: 38},
+  {key: 'what_to_say', label: 'What to say on the next call', width: 44},
+  {key: 'proof', label: 'Proof (call date, minute, exact words)', width: 44},
+], 'Category follows a fixed rule; the evidence column counts past leads in the same situation. Play the cited minute to check any row.');
+worklist.forEach((row, r) => {
+  const fill = CATEGORY_FILL[row.category];
+  if (fill) ws.getRangeByIndexes(4 + r, 1, 1, 1).format.fill = fill;
+});
+sheet('Lead journeys', 'Each lead\'s calls in order', journeys, [
+  {key: 'lead', label: 'Lead', width: 9},
+  {key: 'status', label: 'Status in the CRM export', width: 16},
   {key: 'calls', label: 'Calls', width: 7},
-  {key: 'experience_years', label: 'Experience (years)', width: 11},
-  {key: 'fresher', label: 'Fresher', width: 9},
-  {key: 'background', label: 'Background', width: 11},
-  {key: 'career_gap', label: 'Career gap', width: 11},
-  {key: 'working_now', label: 'Working now', width: 11},
-  {key: 'current_role', label: 'Current role', width: 24},
-  {key: 'company', label: 'Company', width: 22},
-  {key: 'location', label: 'Location', width: 16},
-  {key: 'salary_lakh_per_year', label: 'Salary (lakh per year)', width: 11},
-  {key: 'target_role', label: 'Target role', width: 18},
-  {key: 'reason_for_the_course', label: 'Reason for the course', width: 28},
-  {key: 'course_for', label: 'Course for', width: 13},
-  {key: 'trendytech_exclusion', label: 'TrendyTech exclusion', width: 18},
-  {key: 'evidence', label: 'Where it was said', width: 60},
-], 'One row per customer. Blank means not stated in any recorded call; nothing is guessed.');
-sheet('Sales Insights', 'What should change in the sales approach', insights, [
-  {key: 'finding', label: 'Finding', width: 34},
-  {key: 'evidence_and_scale', label: 'Evidence and scale', width: 46},
-  {key: 'sales_implication', label: 'Sales implication', width: 38},
-  {key: 'recommended_change', label: 'Recommended change', width: 44},
-  {key: 'suggested_wording', label: 'Suggested wording (proposed)', width: 40},
-  {key: 'how_to_assess', label: 'How to assess improvement', width: 34},
-  {key: 'source', label: 'Source', width: 46},
-]);
+  {key: 'first_call', label: 'First call', width: 12},
+  {key: 'last_call', label: 'Last call', width: 12},
+  {key: 'journey', label: 'Journey (date, call type, length: what happened)', width: 110},
+], 'One line per call; open leads and pilot customers.');
+sheet('Calls', 'Structured call data', calls, [
+  {key: 'lead', label: 'Lead', width: 9},
+  {key: 'date', label: 'Date', width: 12},
+  {key: 'type', label: 'Call type', width: 14},
+  {key: 'length', label: 'Length', width: 9},
+  {key: 'summary', label: 'What happened', width: 60},
+  {key: 'objections', label: 'Objections raised and how they were handled', width: 50},
+  {key: 'next_step', label: 'Next step noted', width: 40},
+], 'One row per recorded call.');
 
 const out = path.join(root, 'deliverables');
 await fs.mkdir(out, {recursive: true});
-for (const name of ['Lead Priorities', 'What Predicts Buying', 'Lead Groups']) {
-  const preview = await workbook.render({sheetName: name, range: 'A1:E9', scale: 1, format: 'png'});
-  await fs.writeFile(path.join(out, 'client-preview-' + name.replaceAll(' ', '-') + '.png'), new Uint8Array(await preview.arrayBuffer()));
-}
 const file = await SpreadsheetFile.exportXlsx(workbook);
 await file.save(path.join(out, 'TrendyTech Pilot Workbook.xlsx'));
+// The export tool leaves a large inspection log beside the workbook; it is not needed.
+await fs.rm(path.join(out, 'TrendyTech Pilot Workbook.xlsx.inspect.ndjson'), {force: true});
 console.log('Client workbook exported to the private deliverables directory.');

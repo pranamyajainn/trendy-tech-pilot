@@ -14,8 +14,9 @@ the 238 development calls only; the 62 calls of the 10 held-out leads were never
 - Reasoning enabled, both greedy and with recommended sampling, bounded at 6,500 generated tokens.
 - Separate purpose, profile and discussion stages to reduce the work in each generation.
 
-The scripts `calibrate_references.py` and `calibrate_staged.py` require development call IDs and write only
-to ignored `data/experiments/`. They do not create production extractions, freeze a method, or contact an API.
+The scripts `calibrate_references.py` and `calibrate_staged.py` (removed from the tree on 7 Oct 2026 with the
+experimental modules `referenced.py` and `experiments.py`; they remain in git history) required development call
+IDs and wrote only to ignored `data/experiments/`, where their outputs are kept. They do not create production extractions, freeze a method, or contact an API.
 Experimental outputs passing reference validation still require meaning and omission review.
 
 ### Findings

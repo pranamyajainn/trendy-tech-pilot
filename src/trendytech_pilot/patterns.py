@@ -25,7 +25,6 @@ from scipy.stats import false_discovery_control, fisher_exact
 
 from .artifacts import current_extraction
 from .profile import lead_calls
-from .quality import wilson_interval
 from .storage import read_json, write_json
 
 # TrendyTech's own exclusions (client call, 5 Oct 2026): not target customers even if they would buy.
@@ -38,14 +37,18 @@ def exclusions(profile):
 
 
 def conversion_rate(b, o, sample_size, population):
-    """Estimated share of a group who bought: buyers / (buyers + non-buyers scaled to their population). Buyers
-    are counted in full, so the interval comes from the non-buyer sample (Wilson), the uncertain part."""
-    rate = b / (b + o * population / sample_size) if b + o else None
-    bounds = wilson_interval(o, sample_size) if sample_size else None
-    if rate is None or bounds is None:
-        return rate, None
-    to_rate = lambda share: b / (b + share * population) if b + share * population else None
-    return rate, (to_rate(bounds[1]), to_rate(bounds[0]))
+    """Estimated share of a group who bought: buyers / (buyers + non-buyers scaled to their population), with a
+    two-sided log-odds (Woolf) interval. Both counts are samples of what could have happened, so both add noise; an
+    interval from the non-buyer sample alone came out 3-5 times too narrow (method review, 7 Oct 2026). Half a lead
+    is added to each count when either is zero."""
+    if not b + o:
+        return None, None
+    w = population / sample_size
+    bb, oo = (b + .5, o + .5) if min(b, o) == 0 else (b, o)
+    centre, se = math.log(bb / (w * oo)), math.sqrt(1 / bb + 1 / oo)
+    expit = lambda z: 1 / (1 + math.exp(-z))
+    return b / (b + w * o), (expit(centre - 1.96 * se), expit(centre + 1.96 * se))
+
 
 PRE = {"sales", "brief_followup"}
 POST = {"enrollment_or_payment", "learner_support", "administrative"}

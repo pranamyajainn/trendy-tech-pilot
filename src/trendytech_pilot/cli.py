@@ -106,7 +106,7 @@ def main():
         if command != "download":
             sub.add_argument("--force", action="store_true")
     cohort = commands.add_parser("cohort")
-    cohort.add_argument("name", choices=["customers", "open_sample"])
+    cohort.add_argument("name", choices=["customers", "open_sample", "archive"])
     cohort_action = cohort.add_mutually_exclusive_group()
     cohort_action.add_argument("--freeze", action="store_true", help="Freeze the method for a full cohort run")
     cohort_action.add_argument("--supersede", metavar="REASON")
@@ -117,8 +117,6 @@ def main():
     profiles.add_argument("--workers", type=int, default=4)
     profiles.add_argument("--force", action="store_true")
     commands.add_parser("patterns", help="Buyers versus non-buyers, and hot/warm/cold lead groups")
-    swot = commands.add_parser("swot", help="Evidence-backed SWOT for pilot leads that are not confirmed customers")
-    swot.add_argument("--force", action="store_true")
     commands.add_parser("status")
     freeze = commands.add_parser("freeze")
     freeze_action = freeze.add_mutually_exclusive_group()
@@ -126,9 +124,10 @@ def main():
     freeze_action.add_argument("--retire", metavar="REASON")
     commands.add_parser("export")
     commands.add_parser("qa")
-    lead_actions = commands.add_parser("lead-actions")
-    lead_actions.add_argument("--force", action="store_true")
-    commands.add_parser("client")
+    worklist = commands.add_parser("worklist", help="Open-lead worklist by the frozen rule (docs/pipeline)")
+    worklist.add_argument("action", choices=["select", "show", "code", "check", "freeze", "export"])
+    worklist.add_argument("lead", nargs="?", help="Lead number (show, check) or comma-separated leads (code)")
+    worklist.add_argument("--force", action="store_true")
     args = parser.parse_args()
     store = Store(args.data_dir)
     asr_model = os.getenv("PILOT_ASR_MODEL", "mlx-community/whisper-large-v3-turbo")
@@ -152,28 +151,6 @@ def main():
                           "current_consensus": sum(current_consensus(store, c["call_id"]) is not None for c in calls),
                           "current_extractions": sum(current_extraction(store, c["call_id"]) is not None for c in calls),
                           "method_frozen": store.path("method-freeze.json").exists()}, indent=2))
-    elif args.command == "swot":
-        from .client import journeys
-        from .ensemble import GeminiVerifier
-        from .swot import draft_swot
-
-        view = {r["lead_number"]: r for r in read_json(store.path("review", "patterns.json"))["pilot_leads"]}
-        model, failures = GeminiVerifier(store), []
-        targets = [j for lead, j in journeys(store, selected_calls(store, "all")).items() if view[lead]["crm"] != "customer"]
-        for i, journey in enumerate(targets, 1):
-            v = view[journey["lead_number"]]
-            context = (f"Category {v['category']} ({'; '.join(v['reasons'] + v['other_factors'])}); "
-                       f"open concerns: {', '.join(v['open_concerns']) or 'none'}")
-            try:
-                profile = read_json(store.path("review", "profiles", journey["lead_number"] + ".json"))
-                draft_swot(store, journey, profile, context, model, args.force)
-                print(f"{i}/{len(targets)} {journey['lead_alias']} swot OK", flush=True)
-            except Exception as exc:  # noqa: BLE001 -- isolate one failed lead; command still exits nonzero
-                failures.append(journey["lead_alias"])
-                print(f"{i}/{len(targets)} {journey['lead_alias']} FAILED {type(exc).__name__}", flush=True)
-        print(json.dumps({"attempted": len(targets), "failed": len(failures), "failed_leads": failures}), flush=True)
-        if failures:
-            raise SystemExit(1)
     elif args.command == "patterns":
         from .patterns import analyse
         result = analyse(store)
@@ -216,27 +193,43 @@ def main():
         from .reporting import export_tables
         print(json.dumps(export_tables(store), indent=2))
     elif args.command == "qa":
+        from .client import validation_pack
         from .quality import export_qa
-        print(json.dumps(export_qa(store), indent=2))
-    elif args.command == "lead-actions":
-        from .client import journeys, lead_action
-        from .ensemble import GeminiVerifier
-
-        model, failures = GeminiVerifier(store), []
-        leads = journeys(store, selected_calls(store, "all"))
-        for i, journey in enumerate(leads.values(), 1):
-            try:
-                lead_action(store, journey, model, args.force)
-                print(f"{i}/{len(leads)} {journey['lead_alias']} lead-action OK", flush=True)
-            except Exception as exc:  # noqa: BLE001 -- isolate one failed lead; command still exits nonzero
-                failures.append(journey["lead_alias"])
-                print(f"{i}/{len(leads)} {journey['lead_alias']} FAILED {type(exc).__name__}", flush=True)
-        print(json.dumps({"attempted": len(leads), "failed": len(failures), "failed_leads": failures}), flush=True)
-        if failures:
-            raise SystemExit(1)
-    elif args.command == "client":
-        from .client import export_client, validation_pack
-        print(json.dumps({**validation_pack(store), **export_client(store)}, indent=2))
+        print(json.dumps({**export_qa(store), **validation_pack(store)}, indent=2))
+    elif args.command == "worklist":
+        from . import worklist as wl
+        if args.action == "select":
+            print(json.dumps(wl.select(store, args.force), indent=2))
+        elif args.action == "show":
+            print(wl.show(store, args.lead))
+        elif args.action == "check":
+            results = wl.check_all(store, [args.lead] if args.lead else None)
+            for lead, problems in results.items():
+                print(f"{lead}: {'OK' if not problems else '; '.join(problems)}")
+            failed = [lead for lead, problems in results.items() if problems]
+            print(json.dumps({"checked": len(results), "failed": len(failed), "failed_leads": failed}))
+            if failed:
+                raise SystemExit(1)
+        elif args.action == "code":
+            # Phase 1 scale: the hosted model codes leads from the same guide. Paid; needs PILOT_ALLOW_REMOTE=1.
+            if os.getenv("PILOT_ALLOW_REMOTE") != "1":
+                raise ValueError("Coding by the hosted model is paid; set PILOT_ALLOW_REMOTE=1")
+            from .remote import GeminiExtractor
+            model, leads, failures = GeminiExtractor(store), (args.lead or "").split(","), []
+            for i, lead in enumerate(lead for lead in leads if lead):
+                try:
+                    wl.code_lead(store, lead, model, args.force)
+                    print(f"{i + 1}/{len(leads)} lead {lead} coded OK", flush=True)
+                except Exception as exc:  # noqa: BLE001 -- isolate one failed lead; command still exits nonzero
+                    failures.append(lead)
+                    print(f"{i + 1}/{len(leads)} lead {lead} FAILED {type(exc).__name__}", flush=True)
+            print(json.dumps({"attempted": len(leads), "failed": len(failures), "failed_leads": failures}))
+            if failures:
+                raise SystemExit(1)
+        elif args.action == "freeze":
+            print(json.dumps(wl.freeze(store, args.force), indent=2))
+        else:
+            print(json.dumps(wl.export(store), indent=2))
     else:
         calls = selected_calls(store, args.split, args.limit, args.calls.split(",") if args.calls else None, args.cohort)
         if args.cohort and args.command in ("gemini-transcribe", "extract"):
