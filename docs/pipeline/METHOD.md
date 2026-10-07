@@ -1,6 +1,7 @@
 # Worklist method: how open leads are graded, and why
 
-Rule version `worklist-rule-v1`, adopted 7 October 2026 after a method review. The figures behind every statement
+Rule version `worklist-rule-v2`. Version 1 was adopted on 7 October 2026 after a method review. Version 2, the same
+day, follows an external review: it adds the unusable-recording category; the rest of the rule is unchanged. The figures behind every statement
 here are private:
 - the review document is in `data/deliverables/internal/`;
 - the research, the reviews and the scripts that reproduce the figures are in `data/research/`.
@@ -12,17 +13,35 @@ This file holds the reasoning only. It contains no client data.
 | # | Category | When | Evidence shown beside it |
 |---|---|---|---|
 | 1 | Check status | The lead's own calls show a bought paid programme, or a promised payment date passed with no conversation since | None: it is a CRM correction, not a sales call |
-| 2 | Not reached | No live conversation ever took place | None |
-| 3 | Outside target | The lead's own words match TrendyTech's exclusion: fresher, non-IT background, or a career gap over a year | Past-lead rate |
-| 4 | Cold: declined | Declined; wants something TrendyTech does not sell; or a condition TrendyTech cannot meet | Past-lead rate, or "too few past cases" |
-| 5 | Hot | A commitment, or a conditional commitment TrendyTech can meet, at a live conversation within 45 days of the export end, with no refusal since | "Commitment stated" and a timing proxy, but no rate (see below) |
-| 6 | Dormant: reconfirm | No live conversation for more than 90 days | None: stale information is not negative information |
-| 7 | Warm | Everything else, including commitments gone stale (marked "re-open") | Past-lead rate |
+| 2 | Recording unusable: confirm status | The recordings have no usable audio, so nothing is known | None |
+| 3 | Not reached | No live conversation ever took place (voicemail, screening, no answer) | None |
+| 4 | Outside target | The lead's own words match TrendyTech's exclusion: fresher, non-IT background, or a career gap over a year | Past-lead rate |
+| 5 | Cold: declined | Declined; wants something TrendyTech does not sell; or a condition TrendyTech cannot meet | Past-lead rate, or "too few past cases" |
+| 6 | Hot | A commitment, or a conditional commitment TrendyTech can meet, at a live conversation within 45 days of the export end, with no refusal since | "Commitment stated" and a timing proxy, but no rate (see below) |
+| 7 | Dormant: reconfirm | No live conversation for more than 90 days | None: stale information is not negative information |
+| 8 | Warm | Everything else, including commitments gone stale (marked "re-open") | Past-lead rate |
 
-Within each category, the most recent conversation comes first. `worklist.categorise` is the code; the table in
+Within each category, the most recent conversation comes first. Every day count is measured to the data cutoff (the
+last recorded call in the export), not to today. Each file says so, for example "Based on recordings available
+through 29 Sep 2026. Confirm current lead status before acting."
+
+## How the worklist reads
+
+The columns, in order:
+- **Lead**, **Priority**, **Reason**. These two lead columns stay frozen while scrolling.
+- **Next action**, **What to say**.
+- **Evidence:** the decisive statement first, as call date and time, minute into the recording, and exact words.
+- **Historical context.**
+- Last conversation, buying intent, profile, open objections, SWOT.
+- **Validation:** "Recording validation pending" until a person has played and confirmed the claims.
+
+The coding check enforces three rules:
+- next actions name a trigger ("after the manager approves the price"), never a relative time;
+- discounts, past offers and trials are always conditional on current approval;
+- dormant leads are messaged to reconfirm interest before any call. `worklist.categorise` is the code; the table in
 `tests/test_worklist.py` pins every branch.
 
-## Past-lead evidence
+## Historical context and past-lead evidence
 
 The same rule is read on closed past leads: the customer cohort against a seeded random sample of non-buyers.
 Only calls before the purchase boundary are used, and only conversations of 3+ minutes. Each category shows:
@@ -35,6 +54,10 @@ Three rules govern what is shown:
   inflated by construction.
 - **Thin categories show no rate.** Fewer than 10 customers or 5 sampled non-buyers is too few for a reliable number.
 - **Dormant shows no rate.** It cannot be measured on closed leads.
+
+**Lead rows carry no rates.** Group rates are broad estimates, not a lead's chance of buying, so they appear only in
+the report's grading table, labelled as group estimates with ranges. A lead row says in words what the history
+supports, or that no dependable comparison exists.
 
 The 45- and 90-day thresholds come from a timing proxy: days from a customer's last sales call to their first
 post-purchase call. That is not the payment date, so the thresholds are provisional until payment dates are
@@ -78,6 +101,7 @@ method. Every method was tested with repeated cross-validation and on later lead
 ## Changing the method
 1. Change `RULE` in `worklist.py`, with a new version name.
 2. Update this file and the tests.
-3. Run `pilot worklist freeze --force` and record the reason in the commit.
+3. Run `pilot worklist freeze --force --reason "..."`. The earlier freezes are kept as history, and the holdout guard
+   keeps using the first freeze time.
 
 A rule changed after seeing holdout results is a new development round, not a result.

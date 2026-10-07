@@ -28,12 +28,14 @@ from .storage import digest, read_json, write_json
 SCHEMA_VERSION = "lead-coding-v1"
 SELECTION_SEED = "worklist-pilot-v1"
 EXTRA_LEADS = 31  # 19 open pilot leads + 31 drawn from the non-buyer sample = 50, as the owner chose (7 Oct 2026).
-# The rule, fixed by the method review of 7 Oct 2026 (decision record in docs/pipeline/METHOD.md). Changing any
-# value is a new rule version and needs a new freeze.
-RULE = {"version": "worklist-rule-v1", "hot_within_days": 45, "dormant_after_days": 90, "min_conversation_seconds": 180,
-        "order": ["Check status", "Not reached", "Outside target", "Cold: declined", "Hot", "Dormant: reconfirm", "Warm"]}
-CATEGORY_ORDER = {c: i for i, c in enumerate(["Hot", "Warm", "Check status", "Dormant: reconfirm", "Cold: declined",
-                                              "Outside target", "Not reached"])}
+# The rule, fixed by the method review of 7 Oct 2026 and revised the same day after an external review (v2: a lead
+# whose only recordings are unusable is not "never reached"). Decision record in docs/pipeline/METHOD.md. Changing
+# any value is a new rule version and needs `pilot worklist freeze --force --reason ...`.
+RULE = {"version": "worklist-rule-v2", "hot_within_days": 45, "dormant_after_days": 90, "min_conversation_seconds": 180,
+        "order": ["Check status", "Recording unusable: confirm status", "Not reached", "Outside target",
+                  "Cold: declined", "Hot", "Dormant: reconfirm", "Warm"]}
+CATEGORY_ORDER = {c: i for i, c in enumerate(["Hot", "Warm", "Check status", "Recording unusable: confirm status",
+                                              "Dormant: reconfirm", "Cold: declined", "Outside target", "Not reached"])}
 
 # ---------- coding schema ----------
 class Evidence(BaseModel):
@@ -82,7 +84,7 @@ class StatusCheck(BaseModel):
 class Stance(BaseModel):
     model_config = ConfigDict(extra="forbid")
     value: Literal["commitment", "conditional_commitment", "dated_deferral", "open_deferral", "open", "declined",
-                   "product_not_sold", "none"]
+                   "product_not_sold", "none", "recording_unusable"]
     detail: str
     condition: str | None
     condition_can_be_met: Literal["yes", "no", "unclear"] | None
@@ -207,6 +209,15 @@ BANNED = re.compile(r"\b(model|AI|gemini|extraction|signal|segment|cohort|h[eo]l
                     re.IGNORECASE)
 PRONOUNS = re.compile(r"\b(he|she|him|her|his|hers|himself|herself)\b", re.IGNORECASE)
 CONTACT = re.compile(r"https?://|www\.|@[a-z0-9-]+\.|\b\d{10}\b|\+91", re.IGNORECASE)
+# Rows describe the lead as of the data cutoff and are read later, so next actions name a trigger ("after the
+# manager approves the price"), never a relative time.
+RELATIVE_TIME = re.compile(r"\b(?:this|next|coming) (?:week|weekend|month)\b|\btoday\b|\btomorrow\b|\btonight\b"
+                           r"|\bright away\b|\bimmediately\b", re.IGNORECASE)
+# A discount, an offer that may have expired, or a trial arrangement is never presented as available.
+OFFER = re.compile(r"discount|(?<!not )(?<!n't )(?<!never )\boffer(?:ed|s)?\b|webinar price|early[- ]?bird|\btrial\b|pre-?book|waiver|% off"
+                   r"|special price|lower price|price nearer|cheaper", re.IGNORECASE)
+CONDITIONAL = re.compile(r"approv|if (?:it is |still |currently )?(?:valid|available|open|allowed)|confirm|current (?:fee|price|offer)"
+                         r"|still (?:valid|available|open)|whether", re.IGNORECASE)
 
 
 def norm(text):
@@ -266,6 +277,12 @@ def check_coding(store, lead, data):
                 problems.append(f"{where}: {what} {m.group()!r}")
         if hit := names & set(re.findall(r"[a-z]{3,}", text.lower())):
             problems.append(f"{where}: personal name {sorted(hit)}")
+    for where, text in [("next_action", coding.next_action)] + [(f"what_to_say.{k}", v) for k, v in
+                                                               coding.what_to_say.model_dump().items()]:
+        if where == "next_action" and (m := RELATIVE_TIME.search(text)):
+            problems.append(f"next_action: relative timing {m.group()!r}; name the trigger instead (data has a cutoff)")
+        if OFFER.search(text) and not CONDITIONAL.search(text):
+            problems.append(f"{where}: a discount, offer or trial must be conditional on current approval")
     for k, v in coding.swot.model_dump().items():
         if len(v.split()) > 25:
             problems.append(f"swot.{k}: over 25 words")
@@ -274,9 +291,9 @@ def check_coding(store, lead, data):
     s = coding.stance
     if s.value == "conditional_commitment" and not (s.condition and s.condition_can_be_met and s.condition_reason):
         problems.append("stance: a conditional commitment needs condition, condition_can_be_met and condition_reason")
-    if s.value == "none" and coding.last_live_conversation is not None:
-        problems.append("stance none (never reached) but a last live conversation is given")
-    if s.value != "none" and coding.last_live_conversation is None and s.value != "declined":
+    if s.value in ("none", "recording_unusable") and coding.last_live_conversation is not None:
+        problems.append(f"stance {s.value} but a last live conversation is given")
+    if s.value not in ("none", "recording_unusable", "declined") and coding.last_live_conversation is None:
         problems.append("a stance other than none needs the last live conversation")
     if coding.last_live_conversation:
         live = by_id.get(coding.last_live_conversation.call_id)
@@ -315,9 +332,11 @@ def categorise(coding, as_of, rule=RULE):
     s = c.stance
     days = (dt.date.fromisoformat(as_of) - dt.date.fromisoformat(c.last_live_conversation.date)).days \
         if c.last_live_conversation else None
-    since = f"{days} days before the data ends" if days is not None else ""
+    since = f"{days} days before the data cutoff" if days is not None else ""
     if c.status_check.needed:
         return "Check status", c.status_check.reason
+    if s.value == "recording_unusable":
+        return "Recording unusable: confirm status", "The recorded calls have no usable audio, so nothing is known"
     if s.value == "none":
         n = c.attempts_since_last_live
         return "Not reached", f"No conversation in {n} recorded call{'s' if n != 1 else ''}"
@@ -382,18 +401,25 @@ def past_lead_evidence(store, rule=RULE):
     return out
 
 
-def freeze(store, force=False):
-    """Fix the rule, export date and evidence. Refused once any holdout lead has been coded, so the holdout is
-    scored only by a rule that never saw it."""
+def freeze(store, force=False, reason=None):
+    """Fix the rule, export date and evidence. The first freeze is refused once any holdout lead has been coded, so
+    the holdout is scored only by a rule that never saw it. A later rule version (--force) needs a reason and keeps
+    the earlier freezes as history; the holdout guard keeps using the first freeze time."""
     path = store.path("review", "worklist-freeze.json")
-    if path.exists() and not force:
-        raise ValueError("The worklist rule is already frozen; a new rule version needs --force and a recorded reason")
-    coded_holdout = [lead for lead in holdout_leads(store) if coding_path(store, lead).exists()]
-    if coded_holdout:
-        raise ValueError(f"Holdout leads were coded before the freeze: {coded_holdout}")
+    previous = read_json(path) if path.exists() else None
+    if previous and not (force and reason):
+        raise ValueError("The worklist rule is already frozen; a new rule version needs --force and --reason")
+    if previous is None:
+        coded_holdout = [lead for lead in holdout_leads(store) if coding_path(store, lead).exists()]
+        if coded_holdout:
+            raise ValueError(f"Holdout leads were coded before the freeze: {coded_holdout}")
+    now = dt.datetime.now(dt.UTC).isoformat()
+    history = (previous.get("history", []) + [{**{k: previous[k] for k in ("rule", "rule_hash", "frozen_at", "as_of")},
+                                                "superseded_reason": reason}]) if previous else []
     record = {"rule": RULE, "rule_hash": digest(RULE), "as_of": export_date(store),
               "evidence": past_lead_evidence(store), "timing": buyer_timing(store), "selection_hash": digest(select(store)),
-              "frozen_at": dt.datetime.now(dt.UTC).isoformat()}
+              "frozen_at": now, "first_frozen_at": previous.get("first_frozen_at", previous["frozen_at"]) if previous else now,
+              "history": history}
     write_json(path, record)
     return record
 
@@ -414,8 +440,9 @@ TYPE_LABEL = {"sales": "Sales call", "brief_followup": "Follow-up", "enrollment_
               "unclear": "Unclear"}
 RESOLUTION_LABEL = {"resolved": "resolved", "partly_addressed": "partly addressed", "unresolved": "not resolved",
                     "not_addressed": "not addressed"}
-SCOPE_NOTE = ("As of the last recorded call in the export. Confirm each lead's current status in LeadSquared before "
-              "calling.")
+def scope_note(as_of):
+    return (f"Based on recordings available through {human(as_of)}. Confirm current lead status before acting. "
+            "Categories and day counts use that cutoff.")
 REVIEW_COLUMNS = ["lead", "category", "claim", "date", "timestamp", "quote", "verdict", "note", "reviewer", "reviewed_at"]
 
 
@@ -424,8 +451,13 @@ def human(day):
     return f"{d.day} {d.strftime('%b')} {d.year}"
 
 
-def cite(ev):
-    return f"{human(ev.date)} at {stamp(ev.start_seconds)}: “{ev.quote}”" if ev else ""
+def cite_call(ev, call_times, label):
+    """Evidence a person can find and play: the call's date and time as recorded, the minute into the recording,
+    and the lead's exact words."""
+    if ev is None:
+        return ""
+    when = call_times.get(ev.call_id, "")
+    return f"{label}: call of {human(ev.date)}{' ' + when[11:16] if when else ''}, minute {stamp(ev.start_seconds)}: “{ev.quote}”"
 
 
 _NAMES = {}
@@ -502,20 +534,17 @@ ROLE_NAME = re.compile(r"\b((?:prospect|lead|learner|student|caller|agent|counse
                        r",?\s+[A-Z][a-z]{2,}(?=[,.;:)]|\s+(?:from|who|to|is|was|will|and|said|asked|called|at|an|a)\b)")
 
 
-def evidence_text(category, evidence, timing):
-    if category == "Hot":
-        return (f"Commitment stated. Past customers' first post-purchase call came a median {timing['median_days']} "
-                f"days after their last sales call; {timing['within_45_share']:.0%} within 45 days.")
-    if category == "Dormant: reconfirm":
-        return "No past rate: the information is stale, not negative."
-    e = evidence.get(category)
-    if not e:
-        return ""
-    if e["customers"] < 10 or e["non_buyers_sampled"] < 5:
-        return (f"Too few similar past leads for a reliable rate ({e['customers']} customers, "
-                f"{e['non_buyers_sampled']} sampled non-buyers).")
-    return (f"{e['rate'] * 10:.1f} in 10 similar past leads bought (range {e['low'] * 10:.1f}–{e['high'] * 10:.1f}); "
-            f"based on {e['customers']} customers and {e['non_buyers_sampled']} sampled non-buyers")
+HISTORICAL_CONTEXT = {
+    "Hot": "No dependable rate: in past calls this was usually said on the call where the customer paid.",
+    "Warm": "Past leads in this position bought at about the average rate (a group estimate, not this lead's chance).",
+    "Outside target": "Past leads matching TrendyTech's exclusion bought less often than other leads (a group finding, "
+                      "not this lead's chance).",
+    "Cold: declined": "Too few comparable past cases for a dependable comparison.",
+    "Dormant: reconfirm": "No dependable comparison: the information is stale, not negative.",
+    "Check status": "Not applicable: confirm the lead's purchase status first.",
+    "Recording unusable: confirm status": "Not applicable: nothing usable was recorded.",
+    "Not reached": "No dependable comparison: the lead was never spoken to.",
+}
 
 
 def buyer_timing(store):
@@ -535,7 +564,9 @@ def buyer_timing(store):
             "within_45_share": sum(x <= 45 for x in lags) / len(lags), "within_90_share": sum(x <= 90 for x in lags) / len(lags)}
 
 
-def worklist_row(coding, category, reason, evidence, timing, as_of):
+def worklist_row(coding, category, reason, as_of, call_times, validated=False):
+    """One worklist row: what a counsellor acts on first (priority, reason, next action, what to say, evidence),
+    then context. The decisive evidence comes first: the status, exclusion or stance statement behind the category."""
     c = coding
     open_obj = [o for o in c.objections if o.status == "open"]
     intent = c.buying_intent
@@ -543,19 +574,24 @@ def worklist_row(coding, category, reason, evidence, timing, as_of):
         met = {"yes": "a decision TrendyTech controls", "no": "TrendyTech does not offer this", "unclear": "depends on the lead"}
         intent += f" Condition: {c.stance.condition} ({met.get(c.stance.condition_can_be_met, 'unclear')})."
     last = (f"{human(c.last_live_conversation.date)} "
-            f"({(dt.date.fromisoformat(as_of) - dt.date.fromisoformat(c.last_live_conversation.date)).days} days)"
-            if c.last_live_conversation else "Never reached")
-    proof = [cite(c.stance.evidence)] + [cite(o.evidence) for o in open_obj[:2]] + (
-        [cite(c.status_check.evidence)] if c.status_check.needed else [])
-    return {"lead": c.lead, "category": category, "why": reason, "past_leads_like_this": evidence_text(category, evidence, timing),
-            "last_conversation": last, "buying_intent": intent,
+            f"({(dt.date.fromisoformat(as_of) - dt.date.fromisoformat(c.last_live_conversation.date)).days} days before cutoff)"
+            if c.last_live_conversation else "No usable conversation")
+    decisive = (c.status_check.evidence if category == "Check status" else
+                c.target_check.evidence if category == "Outside target" else c.stance.evidence)
+    proof = [cite_call(decisive, call_times, "Why")] + [cite_call(o.evidence, call_times, f"Objection ({o.topic})")
+                                                         for o in open_obj[:2]]
+    action = c.next_action
+    if category == "Dormant: reconfirm":
+        action = "Message the lead to reconfirm interest before any call. If the lead replies: " + action
+    return {"lead": c.lead, "priority": category, "reason": reason, "next_action": action,
+            "what_to_say": f"Open: {c.what_to_say.opener}\nAsk: {c.what_to_say.question}\nClose: {c.what_to_say.ask}",
+            "evidence": "\n".join(p for p in dict.fromkeys(proof) if p) or "No usable recording",
+            "historical_context": HISTORICAL_CONTEXT[category], "last_conversation": last, "buying_intent": intent,
             "experience": c.profile.experience.display, "role": c.profile.role.display, "ctc": c.profile.ctc.display,
             "location": c.profile.location.display,
             "open_objections": "\n".join(f"{o.topic.capitalize()}: {o.detail}" for o in open_obj) or "None open",
             "swot": "\n".join(f"{k[0].upper()}: {v}" for k, v in c.swot.model_dump().items()),
-            "next_action": c.next_action,
-            "what_to_say": f"Open: {c.what_to_say.opener}\nAsk: {c.what_to_say.question}\nClose: {c.what_to_say.ask}",
-            "proof": "\n".join(p for p in dict.fromkeys(proof) if p)}
+            "validation": "Checked against the recording" if validated else "Recording validation pending"}
 
 
 def journey_rows(store, leads):
@@ -587,8 +623,9 @@ def journey_rows(store, leads):
 
 
 def review_sheet(store, rows, codings):
-    """One line per claim behind every Hot, Warm and Check-status row, for a person to play and sign. Kept
-    (with any signatures) across re-exports; new claims are appended."""
+    """One line per claim to play and sign: the decisive statement behind every row's category, and each open
+    objection behind a Hot, Warm or Check-status row. Signatures are kept across re-exports. Returns the sheet
+    status and the leads whose every claim is signed Confirmed."""
     import csv
     path = store.path("qa", "worklist-review.csv")
     existing = {}
@@ -597,18 +634,18 @@ def review_sheet(store, rows, codings):
             existing = {(r["lead"], r["claim"], r["quote"]): r for r in csv.DictReader(handle)}
     out = []
     for row in rows:
-        if row["category"] not in ("Hot", "Warm", "Check status"):
-            continue
-        c = codings[row["lead"]]
-        claims = [("stance: " + c.stance.detail, c.stance.evidence)] + [
-            (f"objection {o.topic}: {o.detail}", o.evidence) for o in c.objections if o.status == "open"]
-        if c.status_check.needed:
-            claims.append(("status: " + (c.status_check.reason or ""), c.status_check.evidence))
+        c, category = codings[row["lead"]], row["priority"]
+        decisive = ((f"status: {c.status_check.reason}", c.status_check.evidence) if category == "Check status" else
+                    (f"exclusion: {c.target_check.reason}", c.target_check.evidence) if category == "Outside target" else
+                    (f"stance: {c.stance.detail}", c.stance.evidence))
+        claims = [decisive]
+        if category in ("Hot", "Warm", "Check status"):
+            claims += [(f"objection {o.topic}: {o.detail}", o.evidence) for o in c.objections if o.status == "open"]
         for claim, ev in claims:
             if ev is None:
                 continue
             key = (row["lead"], claim, ev.quote)
-            out.append(existing.get(key) or {"lead": row["lead"], "category": row["category"], "claim": claim,
+            out.append(existing.get(key) or {"lead": row["lead"], "category": category, "claim": claim,
                                              "date": ev.date, "timestamp": stamp(ev.start_seconds), "quote": ev.quote,
                                              "verdict": "", "note": "", "reviewer": "", "reviewed_at": ""})
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -616,8 +653,14 @@ def review_sheet(store, rows, codings):
         writer = csv.DictWriter(handle, REVIEW_COLUMNS)
         writer.writeheader()
         writer.writerows(out)
-    signed = [r for r in out if r["reviewer"] and r["reviewed_at"] and r["verdict"]]
-    return {"claims": len(out), "signed": len(signed), "complete": bool(out) and len(signed) == len(out)}
+    signed = lambda r: r["reviewer"] and r["reviewed_at"] and r["verdict"]
+    by_lead = {}
+    for r in out:
+        by_lead.setdefault(r["lead"], []).append(r)
+    confirmed = {lead for lead, claims in by_lead.items()
+                 if all(signed(r) and r["verdict"].strip().lower() == "confirmed" for r in claims)}
+    done = [r for r in out if signed(r)]
+    return {"claims": len(out), "signed": len(done), "complete": bool(out) and len(done) == len(out)}, confirmed
 
 
 def export(store):
@@ -629,24 +672,26 @@ def export(store):
     if problems:
         raise ValueError(f"{len(problems)} coded leads fail `pilot worklist check`: {sorted(problems)}")
     hold = holdout_leads(store)
-    frozen_at = dt.datetime.fromisoformat(record["frozen_at"]).timestamp()
+    frozen_at = dt.datetime.fromisoformat(record.get("first_frozen_at", record["frozen_at"])).timestamp()
     early = [lead for lead in leads if lead in hold and coding_path(store, lead).stat().st_mtime < frozen_at]
     if early:
         raise ValueError(f"Holdout leads coded before the freeze: {early}")
-    timing = record.get("timing") or buyer_timing(store)
     codings = {lead: LeadCoding.model_validate(read_json(coding_path(store, lead))) for lead in leads}
+    categories = {lead: categorise(codings[lead], record["as_of"]) for lead in leads}
+    call_times = {c["call_id"]: c["created_on"] for lead in leads for c in calls_of(store, lead)}
+    stub = [{"lead": lead, "priority": categories[lead][0]} for lead in leads]
+    review, confirmed = review_sheet(store, stub, codings)
     rows, internal = [], []
     for lead in leads:
-        category, reason = categorise(codings[lead], record["as_of"])
-        rows.append(worklist_row(codings[lead], category, reason, record["evidence"], timing, record["as_of"]))
+        category, reason = categories[lead]
+        rows.append(worklist_row(codings[lead], category, reason, record["as_of"], call_times, lead in confirmed))
         internal.append({"lead": lead, "category": category, "reason": reason, "coder": codings[lead].coder,
                          "holdout": lead in hold, "source": "pilot" if lead in select(store)["pilot_open"] else "non-buyer sample",
                          "coding_hash": digest(read_json(coding_path(store, lead)))})
-    days = lambda r: int(re.search(r"\((\d+) days\)", r["last_conversation"]).group(1)) if "days)" in r["last_conversation"] else 10**6
-    rows.sort(key=lambda r: (CATEGORY_ORDER[r["category"]], days(r), r["lead"]))
+    days = lambda r: int(m.group(1)) if (m := re.search(r"\((\d+) days", r["last_conversation"])) else 10**6
+    rows.sort(key=lambda r: (CATEGORY_ORDER[r["priority"]], days(r), r["lead"]))
     pilot = sorted(lead_calls(store, "pilot"))
     journeys, calls = journey_rows(store, sorted(set(pilot) | set(leads)))
-    review = review_sheet(store, rows, codings)
     # Capitalised words that never occur in lower case anywhere in the client text: possible names for a person
     # to scan before anything is shared (spoken names the CRM does not hold cannot all be caught by rule).
     text = " ".join(str(v) for r in rows + journeys + calls for v in r.values())
@@ -657,15 +702,16 @@ def export(store):
                              if w.lower() not in lower and w.lower() not in calendar})
     audit = validation_status(store)
     audit_done = audit["complete"]
-    counts = {c: sum(r["category"] == c for r in rows) for c in CATEGORY_ORDER}
-    meta = {"scope_note": SCOPE_NOTE, "as_of": record["as_of"], "review_draft": not (review["complete"] and audit_done),
-            "categories": counts, "leads": len(rows), "journeys": len(journeys), "calls": len(calls),
-            "evidence": record["evidence"], "timing": timing, "rule": record["rule"], "validation": audit,
-            "hand_check": review}
+    counts = {c: sum(r["priority"] == c for r in rows) for c in CATEGORY_ORDER}
+    meta = {"scope_note": scope_note(record["as_of"]), "as_of": record["as_of"],
+            "review_draft": not (review["complete"] and audit_done), "categories": counts, "leads": len(rows),
+            "journeys": len(journeys), "calls": len(calls), "evidence": record["evidence"], "rule": record["rule"],
+            "validation": audit, "hand_check": review}
     for name, value in (("meta", meta), ("worklist", rows), ("journeys", journeys), ("calls", calls)):
         write_json(store.path("exports", "client", f"{name}.json"), value)
     write_json(store.path("exports", "internal", "worklist.json"),
                {"rule_hash": record["rule_hash"], "frozen_at": record["frozen_at"], "as_of": record["as_of"],
+                "first_frozen_at": record.get("first_frozen_at", record["frozen_at"]), "timing": record.get("timing"),
                 "leads": internal, "hand_check": review, "audit": audit, "possible_names_to_scan": possible_names})
     return {"leads": len(rows), "categories": counts, "journeys": len(journeys), "calls": len(calls),
             "hand_check": review, "review_draft": meta["review_draft"]}
@@ -673,7 +719,7 @@ def export(store):
 
 # ---------- 3b. coding by the hosted model (Phase 1 scale) ----------
 GUIDE_PATH = __import__("pathlib").Path(__file__).resolve().parents[2] / "docs" / "pipeline" / "CODING-GUIDE.md"
-CODING_PROMPT_VERSION = "lead-coding-prompt-v1"
+CODING_PROMPT_VERSION = "lead-coding-prompt-v2"  # v2: triggers, conditional offers, decisive evidence
 
 
 def code_lead(store, lead, model, force=False):

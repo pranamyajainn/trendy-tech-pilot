@@ -16,7 +16,8 @@ power.
 ```bash
 pilot status                              # inventory; method must show frozen
 pilot worklist check                      # every coded lead valid (holdout listed as "not coded" until step 3)
-pilot worklist freeze                     # once only; refuses if a holdout lead is already coded
+pilot worklist freeze                     # first freeze; refuses if a holdout lead is already coded
+# a new rule version later: pilot worklist freeze --force --reason "what changed and why"
 # ... code the 3 open holdout leads now (CODING-GUIDE.md), then a second reading, then:
 pilot worklist check
 pilot worklist export                     # categories, client sheets, internal record, data/qa/worklist-review.csv
@@ -69,7 +70,7 @@ About 5,500 calls (about 15,600 audio minutes) are not processed yet.
 4. **Profiles:** `pilot profiles <group>`. The `profiles` command takes a group name; add `archive` to its choices
    in `cli.py` when needed.
 5. **Recompute the past-lead evidence on the full data.** This is a new freeze, because the evidence changes: run
-   `pilot worklist freeze --force` and record the reason.
+   `pilot worklist freeze --force --reason "..."`.
 6. **Code the open leads at scale with `pilot worklist code <leads>`.** First measure agreement with the pilot's
    reviewed codings:
    - code the same leads with the model into a scratch copy of `data/`;

@@ -1,7 +1,7 @@
 # TrendyTech sales call extraction pilot
 
 Implementation of the approximately 300-call, 50-lead extraction pilot in proposal SAI-Q-2026-013.
-The deliverable is a three-sheet client workbook (open-lead worklist, lead journeys, call data), a two-page
+The deliverable is a three-sheet client workbook (open-lead worklist, lead journeys, call data), a short
 report and an internal gate note on cost and accuracy. There is no dashboard.
 **Start with [docs/pipeline/README.md](docs/pipeline/README.md)**: the pipeline end to end, the runbook for the pilot
 and Phases 1-2, the grading method and the lead coding guide. Read [the pilot scope](docs/pilot-scope.md) before
@@ -87,7 +87,7 @@ Busy (429/503) responses are retried under the same reservation, and daily-quota
 - `data/exports/client/`: the only source for client deliverables (`pilot worklist export`): worklist rows,
   lead journeys, calls and meta, with evidence as date and time into the recording.
 - `data/deliverables/TrendyTech Pilot Workbook.xlsx`: client workbook (`scripts/build_client_workbook.mjs`).
-- `data/deliverables/TrendyTech Pilot Report.docx`: two-page client report (`scripts/build_report.py`).
+- `data/deliverables/TrendyTech Pilot Report.docx`: short client report (`scripts/build_report.py`).
 - `data/deliverables/internal/`: the gate note (`scripts/build_gate_note.py`) and internal workbook.
   The internal workbook (`scripts/build_internal_workbook.mjs`, from `pilot export`) holds per-stage costs,
   coverage and the review queue. Neither is for the client.

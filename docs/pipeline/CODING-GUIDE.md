@@ -54,6 +54,17 @@ call after the last live conversation that was not itself a live conversation.
    signal, segment, cohort, holdout, development, fingerprint, transcript.
 6. **Specific, not generic.** Every action names this lead's actual situation: amounts, products, dates, what was
    promised.
+7. **Triggers, not relative time.** Rows are read after the data cutoff. In `next_action`, never write "today",
+   "tomorrow", "this week" or "next month". Name the trigger or the order instead: "Contact the lead after the
+   manager approves the price", "Message first; call only if the lead replies". `pilot worklist check` rejects
+   relative timing in `next_action`.
+8. **Offers are conditional.** A discount, an offer that may have expired, a webinar or early-bird price, or a trial
+   arrangement is never presented as available. Write it as conditional on current approval: "if the manager
+   approves", "confirm the current fee first", "if the offer is still valid". The check rejects an offer word without
+   approval or confirmation wording, in `next_action` and `what_to_say`.
+9. **Decisive evidence.** The evidence behind the category must prove it. For `outside_target`, quote the statement
+   that shows the exclusion ("I'm in my second year"), not a nearby line ("Okay, I'll try"). For a status check, quote
+   the line that shows the purchase or the missed payment date. For a commitment, quote the commitment.
    - Bad: "Follow up to confirm interest."
    - Good: "Manager to approve one final price for the two-course bundle (lead asked 90k, offer was 99k), then call
      this week."
@@ -72,7 +83,8 @@ Use the strongest value that applies. A later refusal overrides an earlier commi
 | `open` | Interested and asking questions, no deferral or commitment. |
 | `declined` | Clearly not interested, chose another option, or denied making the enquiry. |
 | `product_not_sold` | Wants something TrendyTech does not sell in that form, after the counsellor clarified. |
-| `none` | No live conversation ever took place. |
+| `none` | No live conversation ever took place (voicemail, call screening, no answer, wrong person). |
+| `recording_unusable` | The recordings have no usable audio, so it cannot be told whether a conversation happened. |
 
 **Can the condition be met?** Answer for things TrendyTech controls or offers:
 

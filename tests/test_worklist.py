@@ -21,7 +21,7 @@ def coding(**over):
             "refused_after_commitment": False, "last_live_conversation": {"date": "2026-09-01", "call_id": "C1"},
             "attempts_since_last_live": 1, "buying_intent": "Ready to pay this week.", "their_next_step": None,
             "objections": [], "swot": {"strength": "s", "weakness": "w", "opportunity": "o", "threat": "t"},
-            "next_action": "Counsellor sends the payment link today.",
+            "next_action": "Counsellor sends the payment link once the lead confirms the batch.",
             "what_to_say": {"opener": "o", "question": "q", "ask": "a"}}
     for key, value in over.items():
         base[key] = value
@@ -50,6 +50,7 @@ AS_OF = "2026-09-29"
     ({"last_live_conversation": {"date": "2026-07-01", "call_id": "C1"}}, "Warm"),  # 90 days: stale commitment
     ({"last_live_conversation": {"date": "2026-06-01", "call_id": "C1"}}, "Dormant: reconfirm"),
     ({"stance": stance("open_deferral")}, "Warm"),
+    ({"stance": stance("recording_unusable"), "last_live_conversation": None}, "Recording unusable: confirm status"),
 ])
 def test_rule_order_is_first_match_wins(over, expected):
     assert wl.categorise(coding(**over), AS_OF)[0] == expected
@@ -85,7 +86,10 @@ def test_a_clean_coding_passes(tmp_path, fake_lead):
     ({"buying_intent": "The model thinks they will buy."}, "internal word"),
     ({"next_action": "Send link to a@b.com today."}, "contact detail"),
     ({"stance": stance("conditional_commitment")}, "needs condition"),
-    ({"stance": stance("none")}, "never reached"),
+    ({"stance": stance("none")}, "but a last live conversation"),
+    ({"next_action": "Call the lead this week about the fee."}, "relative timing"),
+    ({"next_action": "Offer the webinar discount on the next call."}, "conditional on current approval"),
+    ({"what_to_say": {"opener": "o", "question": "q", "ask": "Shall I hold the early-bird price?"}}, "conditional"),
 ])
 def test_bad_codings_are_rejected(tmp_path, fake_lead, over, problem):
     problems = wl.check_coding(Store(tmp_path), "100001", coding(**over))
@@ -167,3 +171,52 @@ def test_summaries_use_the_sheet_terms():
     assert wl.wording("The agent called the prospect; the lead the lead agreed.") == \
         "The counsellor called the lead; the lead agreed."
     assert wl.wording("Agentic GenAI course") == "Agentic GenAI course"
+
+
+
+def test_offers_pass_only_when_conditional_on_current_approval(tmp_path, fake_lead):
+    ok = coding(next_action="If the manager approves the discount, send the revised fee and call the lead.")
+    assert wl.check_coding(Store(tmp_path), "100001", ok) == []
+
+
+CALL_TIMES = {"C1": "2026-09-01T14:02:00"}
+
+
+def test_rows_lead_with_action_and_decisive_evidence_and_carry_no_group_rates():
+    excluded = coding(target_check={"value": "outside_target", "reason": "Second-year student",
+                                    "evidence": {**EV, "quote": "I will pay this week"}})
+    row = wl.worklist_row(wl.LeadCoding.model_validate(excluded), "Outside target", "Second-year student", AS_OF, CALL_TIMES)
+    assert list(row)[:6] == ["lead", "priority", "reason", "next_action", "what_to_say", "evidence"]
+    assert row["evidence"].startswith("Why: call of 1 Sep 2026 14:02, minute 01:02:")
+    assert row["last_conversation"] == "1 Sep 2026 (28 days before cutoff)"
+    assert row["validation"] == "Recording validation pending"
+    for text in wl.HISTORICAL_CONTEXT.values():
+        assert not __import__("re").search(r"\d", text)  # group estimates stay in the report, not on lead rows
+
+
+def test_dormant_rows_message_before_calling():
+    old = wl.LeadCoding.model_validate(coding(stance=stance("open_deferral"),
+                                              last_live_conversation={"date": "2026-05-01", "call_id": "C1"}))
+    category, reason = wl.categorise(old, AS_OF)
+    row = wl.worklist_row(old, category, reason, AS_OF, CALL_TIMES)
+    assert category == "Dormant: reconfirm" and row["next_action"].startswith("Message the lead to reconfirm interest")
+
+
+def test_a_new_rule_version_keeps_history_and_the_first_freeze_time(tmp_path, monkeypatch):
+    store = Store(tmp_path)
+    monkeypatch.setattr(wl, "holdout_leads", lambda store: set())
+    for name, value in (("export_date", "2026-09-29"), ("past_lead_evidence", {}), ("buyer_timing", {}),
+                        ("select", {"drawn": []})):
+        monkeypatch.setattr(wl, name, lambda store, v=value: v)
+    first = wl.freeze(store)
+    with pytest.raises(ValueError, match="needs --force and --reason"):
+        wl.freeze(store, force=True)
+    second = wl.freeze(store, force=True, reason="separate unusable recordings")
+    assert second["first_frozen_at"] == first["frozen_at"]
+    assert second["history"][0]["superseded_reason"] == "separate unusable recordings"
+
+
+
+def test_saying_trendytech_does_not_offer_something_is_not_an_offer(tmp_path, fake_lead):
+    fine = coding(next_action="TrendyTech does not offer live GenAI classes; send the recorded option details once asked.")
+    assert wl.check_coding(Store(tmp_path), "100001", fine) == []

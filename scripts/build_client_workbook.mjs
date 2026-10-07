@@ -22,6 +22,7 @@ const col = n => {
 const CATEGORY_FILL = {
   'Hot': '#F8D7DA', 'Warm': '#FDEBD0', 'Check status': '#D6E4F5', 'Dormant: reconfirm': '#E9ECEF',
   'Cold: declined': '#E2E3E5', 'Outside target': '#EFEFEF', 'Not reached': '#F4F4F4',
+  'Recording unusable: confirm status': '#D6E4F5',
 };
 
 function sheet(name, title, rows, columns, subtitle) {
@@ -55,12 +56,15 @@ function sheet(name, title, rows, columns, subtitle) {
   return ws;
 }
 
-const ws = sheet('Worklist', 'Open leads: who to call, why, and what to say', worklist, [
+const ws = sheet('Worklist', 'Open leads: who to contact, why, and what to say', worklist, [
   {key: 'lead', label: 'Lead', width: 9},
-  {key: 'category', label: 'Category', width: 13},
-  {key: 'why', label: 'Why this category', width: 30},
-  {key: 'past_leads_like_this', label: 'Similar past leads (evidence)', width: 26},
-  {key: 'last_conversation', label: 'Last conversation', width: 14},
+  {key: 'priority', label: 'Priority', width: 14},
+  {key: 'reason', label: 'Reason', width: 30},
+  {key: 'next_action', label: 'Next action', width: 40},
+  {key: 'what_to_say', label: 'What to say on the next call', width: 44},
+  {key: 'evidence', label: 'Evidence (call, minute, exact words)', width: 46},
+  {key: 'historical_context', label: 'Historical context', width: 30},
+  {key: 'last_conversation', label: 'Last conversation', width: 16},
   {key: 'buying_intent', label: 'Buying intent', width: 34},
   {key: 'experience', label: 'Experience', width: 16},
   {key: 'role', label: 'Current role', width: 20},
@@ -68,14 +72,14 @@ const ws = sheet('Worklist', 'Open leads: who to call, why, and what to say', wo
   {key: 'location', label: 'Location', width: 12},
   {key: 'open_objections', label: 'Open objections', width: 36},
   {key: 'swot', label: 'Opportunity SWOT (S, W, O, T)', width: 44},
-  {key: 'next_action', label: 'Next action', width: 38},
-  {key: 'what_to_say', label: 'What to say on the next call', width: 44},
-  {key: 'proof', label: 'Proof (call date, minute, exact words)', width: 44},
-], 'Category follows a fixed rule; the evidence column counts past leads in the same situation. Play the cited minute to check any row.');
+  {key: 'validation', label: 'Validation', width: 16},
+], 'Priority follows a fixed rule. Historical context describes groups of past leads, not any lead\'s chance of buying. Play the cited minute to check any row.');
 worklist.forEach((row, r) => {
-  const fill = CATEGORY_FILL[row.category];
+  const fill = CATEGORY_FILL[row.priority];
   if (fill) ws.getRangeByIndexes(4 + r, 1, 1, 1).format.fill = fill;
 });
+// Lead and Priority stay visible while scrolling right.
+ws.freezePanes.freezeColumns(2);
 sheet('Lead journeys', 'Each lead\'s calls in order', journeys, [
   {key: 'lead', label: 'Lead', width: 9},
   {key: 'status', label: 'Status in the CRM export', width: 16},

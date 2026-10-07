@@ -2,7 +2,7 @@
 
 Python CLI that turns a client CRM call export and recordings into evidence-linked, model-verified call
 extractions and an open-lead worklist graded by a frozen rule, with a three-sheet client workbook (worklist, lead
-journeys, calls), a two-page client report and an internal gate note, for a ~300-call / 50-lead paid pilot.
+journeys, calls), a short client report and an internal gate note, for a ~300-call / 50-lead paid pilot.
 START WITH docs/pipeline/README.md: the pipeline end to end, runbook, method and lead coding guide. The final proposal SAI-Q-2026-013 (2 Oct 2026, private under data/source/)
 is the authority; read it before changing deliverables. Scope: docs/pilot-scope.md. QA: docs/qa-protocol.md.
 Method history: docs/local-evaluation.md. PROJECT_HANDOFF.md is an untracked 3 Oct 2026 snapshot; verify it.

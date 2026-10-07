@@ -128,6 +128,7 @@ def main():
     worklist.add_argument("action", choices=["select", "show", "code", "check", "freeze", "export"])
     worklist.add_argument("lead", nargs="?", help="Lead number (show, check) or comma-separated leads (code)")
     worklist.add_argument("--force", action="store_true")
+    worklist.add_argument("--reason", help="Why a new rule version is frozen (freeze --force)")
     args = parser.parse_args()
     store = Store(args.data_dir)
     asr_model = os.getenv("PILOT_ASR_MODEL", "mlx-community/whisper-large-v3-turbo")
@@ -227,7 +228,7 @@ def main():
             if failures:
                 raise SystemExit(1)
         elif args.action == "freeze":
-            print(json.dumps(wl.freeze(store, args.force), indent=2))
+            print(json.dumps(wl.freeze(store, args.force, args.reason), indent=2))
         else:
             print(json.dumps(wl.export(store), indent=2))
     else:
