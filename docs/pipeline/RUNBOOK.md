@@ -24,6 +24,7 @@ pilot worklist export                     # categories, client sheets, internal 
 $NODE scripts/build_client_workbook.mjs   # data/deliverables/TrendyTech Pilot Workbook.xlsx
 .venv/bin/python scripts/build_report.py  # data/deliverables/TrendyTech Pilot Report.docx
 .venv/bin/python scripts/build_gate_note.py   # data/deliverables/internal/Pilot Gate Note.docx (owner only)
+node scripts/build_approach_deck.js       # data/deliverables/TrendyTech Pilot Approach.pptx (plain client deck)
 ```
 
 Running `export` and the three builders again gives identical files, apart from the build timestamps inside the

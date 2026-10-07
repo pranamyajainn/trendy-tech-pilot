@@ -41,7 +41,8 @@ Method history: docs/local-evaluation.md. PROJECT_HANDOFF.md is an untracked 3 O
 - Long runs: wrap in `caffeinate -is`, on mains power with the lid open; a sleeping Mac stalls requests.
 - Outputs:  NODE=~/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node
             $NODE scripts/build_client_workbook.mjs; $NODE scripts/build_internal_workbook.mjs (internal, from export)
-            .venv/bin/python scripts/build_report.py; .venv/bin/python scripts/build_gate_note.py (internal)
+            .venv/bin/python scripts/build_report.py; .venv/bin/python scripts/build_gate_note.py (internal);
+            node scripts/build_approach_deck.js (plain client deck; numbers from the exports and research figures)
 - Before any push: stage intended files only, run .venv/bin/python scripts/check_public_tree.py,
   git diff --cached --check, and read the staged content.
 
